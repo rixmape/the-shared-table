@@ -1,0 +1,413 @@
+================================================================================
+THE SHARED TABLE — FUNCTIONAL REQUIREMENTS DOCUMENT
+Mobile-Only Single Page Web Application
+================================================================================
+
+Document Version : 1.0
+Date              : February 9, 2026
+Status            : Draft — For Organizer Review
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+1. Product Overview
+2. User Roles
+3. Functional Requirements
+   3.1  Admin Panel — Topic & Question Management
+   3.2  Admin Panel — Session Management
+   3.3  Session Creation (Host/Facilitator Flow)
+   3.4  Session Joining (Guest Flow)
+   3.5  Topic Voting
+   3.6  Topic Confirmation & Reveal
+   3.7  Question Randomizer
+   3.8  Round Management
+   3.9  Session History & Records
+4. Non-Functional Constraints
+5. Out of Scope (Future Considerations)
+6. Glossary
+
+================================================================================
+1. PRODUCT OVERVIEW
+================================================================================
+
+The Shared Table is a community gathering initiative in Baguio City where
+strangers share a meal and unfiltered conversation. This application serves as
+a digital companion to in-person gatherings, providing a structured yet
+spontaneous way to surface conversation topics and questions.
+
+The core function is a question randomizer. Before a meal, guests vote on
+topics they find interesting. The app determines the group's top topics, and
+throughout the gathering, each guest taps a button to receive a random
+question drawn from those topics — which they then answer aloud at the table.
+
+Platform        : Web application (single page application)
+Target Device   : Mobile phones only (fixed mobile viewport; no responsive
+                  breakpoints for tablet or desktop)
+Language        : English only
+Connectivity    : Assumes reliable internet connection
+
+================================================================================
+2. USER ROLES
+================================================================================
+
+ROLE            DESCRIPTION
+-----------     ----------------------------------------------------------------
+Organizer       Has access to the admin panel. Manages the master list of topics
+(Admin)         and questions. Can view session history. May also act as a host.
+
+Host            The person who creates a gathering session, shares the join
+(Facilitator)   code/QR, and controls the session flow (confirming topics,
+                advancing rounds, ending the session). One host per session.
+
+Guest           A participant who joins a session via QR code or session code,
+(Participant)   votes on topics, and picks questions during the gathering.
+
+NOTE: In the initial release, the Organizer and Host may be the same person.
+The system should be architected so that user roles can be extended in future
+iterations (see Section 5).
+
+================================================================================
+3. FUNCTIONAL REQUIREMENTS
+================================================================================
+
+Each requirement is labeled with a unique ID for traceability.
+
+Prefix key:
+  ADM  = Admin Panel
+  SES  = Session Management
+  SCR  = Session Creation
+  SJN  = Session Joining
+  VOT  = Topic Voting
+  TCR  = Topic Confirmation & Reveal
+  QRN  = Question Randomizer
+  RND  = Round Management
+  HST  = Session History
+
+--------------------------------------------------------------------------------
+3.1  ADMIN PANEL — TOPIC & QUESTION MANAGEMENT
+--------------------------------------------------------------------------------
+
+ADM-01  The system shall provide a password-protected admin panel accessible
+        only to organizers.
+
+ADM-02  The admin panel shall allow organizers to perform the following
+        operations on TOPICS:
+          a. View all existing topics in a scrollable list.
+          b. Add a new topic with a display name.
+          c. Edit an existing topic's display name.
+          d. Remove a topic from the master list.
+
+ADM-03  The admin panel shall allow organizers to perform the following
+        operations on QUESTIONS:
+          a. View all questions grouped or filtered by topic.
+          b. Add a new question and assign it to exactly one topic.
+          c. Edit an existing question's text or reassign it to a
+             different topic.
+          d. Remove a question from the pool.
+
+ADM-04  When a topic is removed, the system shall prompt the organizer to
+        confirm, warning that all questions under that topic will also
+        become unavailable.
+
+ADM-05  The admin panel shall display the total count of questions per topic
+        to help organizers gauge pool depth.
+
+ADM-06  Topics and questions shall have no character limit enforced by the
+        system, but the UI should gracefully handle long text with
+        truncation or wrapping.
+
+--------------------------------------------------------------------------------
+3.2  ADMIN PANEL — SESSION MANAGEMENT
+--------------------------------------------------------------------------------
+
+SES-01  The admin panel shall include a "Session History" section listing all
+        past sessions (see Section 3.9 for record details).
+
+SES-02  The admin panel shall allow organizers to view the details of any
+        past session.
+
+SES-03  The admin panel shall allow organizers to delete a session record.
+
+--------------------------------------------------------------------------------
+3.3  SESSION CREATION (HOST/FACILITATOR FLOW)
+--------------------------------------------------------------------------------
+
+SCR-01  A host shall be able to create a new gathering session from the app.
+
+SCR-02  Upon session creation, the system shall generate:
+          a. A unique alphanumeric session code (short, easy to read aloud;
+             recommended 5–6 characters, case-insensitive).
+          b. A QR code that encodes the session join URL.
+
+SCR-03  The session lobby screen shall display:
+          a. The session code (prominently).
+          b. The QR code (scannable by guests' phone cameras).
+          c. A live list of guests who have joined, showing their nicknames.
+          d. The current number of joined guests.
+
+SCR-04  The host shall have a control to proceed from the lobby to the
+        topic voting phase once all expected guests have joined. There is no
+        enforced minimum or maximum guest count.
+
+SCR-05  The host shall have the ability to end or close a session at any
+        point during the gathering.
+
+--------------------------------------------------------------------------------
+3.4  SESSION JOINING (GUEST FLOW)
+--------------------------------------------------------------------------------
+
+SJN-01  A guest shall be able to join a session by either:
+          a. Scanning the QR code displayed by the host, or
+          b. Manually entering the session code on the app's join screen.
+
+SJN-02  After entering or scanning the code, the guest shall be prompted to
+        provide a nickname (freeform text input).
+
+SJN-03  The system shall validate that the nickname is:
+          a. Not empty.
+          b. Not a duplicate of another nickname already in the session.
+
+SJN-04  Upon successful entry, the guest shall see a waiting/lobby screen
+        confirming they have joined, displaying:
+          a. The session code.
+          b. The list of other guests who have joined (by nickname).
+
+SJN-05  Guests shall not be required to create an account. Session access
+        is ephemeral via the code/QR mechanism.
+
+--------------------------------------------------------------------------------
+3.5  TOPIC VOTING
+--------------------------------------------------------------------------------
+
+VOT-01  When the host advances to the voting phase, all guests shall
+        simultaneously see the master list of available topics on their
+        screens.
+
+VOT-02  Each guest shall select exactly 3 topics from the list. The
+        selection is unranked — all three carry equal weight.
+
+VOT-03  The UI shall enforce the 3-topic limit:
+          a. After selecting 3, further selections shall be disabled unless
+             the guest deselects one.
+          b. A visible counter (e.g., "2 of 3 selected") shall guide the
+             guest.
+
+VOT-04  Each guest shall confirm their selections by tapping a "Submit"
+        button.
+
+VOT-05  After submitting, the guest shall see a waiting screen indicating
+        that the host is reviewing results.
+
+VOT-06  The system shall tally votes and determine the top 3 topics by
+        highest total vote count.
+
+VOT-07  In the event of a tie for any of the top 3 positions, the system
+        shall present the tied topics to the host for manual tiebreaker
+        resolution (see Section 3.6).
+
+VOT-08  The host's screen shall display the voting results in real time
+        (or upon all guests submitting), showing each topic and its vote
+        count, sorted descending.
+
+--------------------------------------------------------------------------------
+3.6  TOPIC CONFIRMATION & REVEAL
+--------------------------------------------------------------------------------
+
+TCR-01  After voting concludes, the host shall see a "Topic Results" screen
+        showing the top 3 topics as determined by votes, along with all
+        other topics and their vote counts.
+
+TCR-02  The host shall have the ability to:
+          a. Confirm the top 3 as-is, or
+          b. Manually override the selection — swapping out a top-3 topic
+             for a different one — before revealing to guests.
+        This accommodates tiebreakers and facilitator discretion.
+
+TCR-03  Once the host confirms the final top 3 topics, the host shall tap
+        a "Reveal Topics" button.
+
+TCR-04  Upon reveal, all guests shall see an announcement screen displaying
+        the 3 chosen topics for the gathering.
+
+TCR-05  After a brief moment (or a "Continue" tap from the host), the
+        session shall transition into the question randomizer phase.
+
+--------------------------------------------------------------------------------
+3.7  QUESTION RANDOMIZER
+--------------------------------------------------------------------------------
+
+QRN-01  During the question phase, each guest's screen shall display a
+        prominent "PICK" button.
+
+QRN-02  When a guest taps "PICK":
+          a. The system shall randomly select one question from the combined
+             pool of questions belonging to the session's 3 confirmed topics.
+          b. The selected question shall be displayed on the guest's screen.
+
+QRN-03  Once a question has been picked by any guest in the session, it
+        shall be removed from the available pool for that session. No
+        question shall appear more than once per session.
+
+QRN-04  The guest shall NOT see the pool of available questions. They only
+        see the result after tapping "PICK."
+
+QRN-05  After picking a question, the guest shall answer it verbally at the
+        table. The app does not collect typed responses.
+
+QRN-06  The guest's screen shall display their picked question until the
+        round advances or the guest is otherwise prompted.
+
+QRN-07  If the available question pool is exhausted (all questions from the
+        3 topics have been used), the system shall notify the host that no
+        more questions are available.
+
+QRN-08  The host's screen shall display a live overview showing:
+          a. Which guests have picked a question in the current round.
+          b. Which guests are still waiting to pick.
+          c. The number of remaining questions in the pool.
+
+--------------------------------------------------------------------------------
+3.8  ROUND MANAGEMENT
+--------------------------------------------------------------------------------
+
+RND-01  A "round" is defined as one cycle where each active guest picks and
+        answers one question.
+
+RND-02  The session shall support multiple consecutive rounds with no
+        predetermined limit.
+
+RND-03  After all guests in a round have picked a question (or the host
+        decides to advance), the host shall be able to start a new round.
+
+RND-04  At the start of each new round, all guests' "PICK" buttons shall
+        become active again, allowing each guest to pick one new question.
+
+RND-05  The question pool carries over across rounds — questions used in
+        earlier rounds remain excluded.
+
+RND-06  The host shall have the option to end the session after any round.
+
+RND-07  When the host ends the session:
+          a. All guests shall see a "Gathering has ended" screen with a
+             closing message (e.g., "Thank you for sharing your table.").
+          b. The session data shall be saved to the session history.
+          c. Guest connections to the session shall be gracefully closed.
+
+--------------------------------------------------------------------------------
+3.9  SESSION HISTORY & RECORDS
+--------------------------------------------------------------------------------
+
+HST-01  Upon session completion, the system shall save a session record
+        containing the following data:
+          a. Session code.
+          b. Date and time of the session (start and end).
+          c. List of guest nicknames who participated.
+          d. Number of guests.
+          e. The 3 confirmed topics.
+          f. The list of questions that were picked during the session,
+             including:
+               - The question text.
+               - The topic it belonged to.
+               - The nickname of the guest who picked it.
+               - The round number in which it was picked.
+
+HST-02  Session records shall be viewable from the admin panel
+        (see SES-01 and SES-02).
+
+HST-03  Session records are read-only. They cannot be edited after the
+        session ends.
+
+HST-04  Session records shall persist indefinitely unless manually deleted
+        by an organizer (see SES-03).
+
+================================================================================
+4. NON-FUNCTIONAL CONSTRAINTS
+================================================================================
+
+These are not full non-functional requirements but constraints derived from
+organizer decisions that shape development.
+
+NF-01   The application shall be a Single Page Application (SPA).
+
+NF-02   The UI shall be designed exclusively for a mobile viewport
+         (approximately 360–414px width). No responsive breakpoints for
+         tablet or desktop are required.
+
+NF-03   The application shall be built assuming a reliable internet
+         connection. Offline support is not required.
+
+NF-04   All user-facing text shall be in English.
+
+NF-05   The application architecture shall be modular and extensible to
+         accommodate future features without significant refactoring
+         (see Section 5).
+
+NF-06   Real-time communication between the host and guests within a session
+         (e.g., transitioning phases, updating the guest list, tracking
+         picks) shall be handled via WebSocket or equivalent real-time
+         protocol.
+
+================================================================================
+5. OUT OF SCOPE (FUTURE CONSIDERATIONS)
+================================================================================
+
+The following features are explicitly excluded from the initial release but
+the application architecture should be designed with awareness of these
+potential additions:
+
+FUTURE-01   User account creation and management (login, profiles,
+            persistent identity across sessions).
+
+FUTURE-02   Role-based access control beyond the current admin/host/guest
+            model.
+
+FUTURE-03   Event scheduling and RSVP system for upcoming gatherings.
+
+FUTURE-04   Post-gathering feedback or rating mechanism.
+
+FUTURE-05   Multi-language support (e.g., Filipino).
+
+FUTURE-06   Responsive design for tablet and desktop.
+
+FUTURE-07   Offline or low-connectivity mode.
+
+FUTURE-08   Analytics dashboard (e.g., most popular topics over time,
+            average session size, guest retention).
+
+================================================================================
+6. GLOSSARY
+================================================================================
+
+Term                Definition
+-----------         ------------------------------------------------------------
+Session             A single gathering event, from creation to ending.
+
+Host                The facilitator who creates and controls a session.
+
+Guest               A participant who joins a session to vote and answer
+                    questions.
+
+Organizer           The administrator(s) of The Shared Table who curate
+                    content and manage the platform.
+
+Topic               A broad conversational theme (e.g., "Family," "Dreams,"
+                    "Childhood").
+
+Question            A specific conversation prompt belonging to one topic
+                    (e.g., "What's a meal that reminds you of home?").
+
+Question Pool       The combined set of available questions from the
+                    session's 3 confirmed topics, minus any already picked.
+
+Round               One cycle in which every guest picks and answers one
+                    question.
+
+Session Code        A short alphanumeric string used to join a session.
+
+Admin Panel         A restricted interface for organizers to manage topics,
+                    questions, and session history.
+
+================================================================================
+END OF DOCUMENT
+================================================================================
