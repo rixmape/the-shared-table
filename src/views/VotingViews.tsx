@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import { useMemo, useState } from "react";
 
 export function HostVotingView() {
-  const { currentSession, topics, simGuestVotes, advancePhase } = useApp();
+  const { currentSession, topics, advancePhase } = useApp();
   if (!currentSession) return null;
 
   const { guests, votes } = currentSession;
@@ -38,16 +38,6 @@ export function HostVotingView() {
             </span>
           ))}
         </div>
-
-        {/* Simulate voting */}
-        {!allVoted && (
-          <button
-            onClick={simGuestVotes}
-            className="w-full h-10 rounded-xl bg-stone-200 text-stone-700 text-sm font-medium mb-5 hover:bg-stone-300 transition-colors"
-          >
-            Simulate All Guests Voting
-          </button>
-        )}
 
         {/* Tally */}
         {Object.keys(votes).length > 0 && (
@@ -89,13 +79,15 @@ export function HostVotingView() {
 }
 
 export function GuestVotingView() {
-  const { currentSession, topics, submitVotes } = useApp();
+  const { currentSession, currentGuestId, topics, submitVotes } = useApp();
   const [selected, setSelected] = useState<string[]>([]);
-  const [submitted, setSubmitted] = useState(false);
 
-  if (!currentSession) return null;
-  // Use last guest as "current" guest for demo
-  const me = currentSession.guests[currentSession.guests.length - 1];
+  if (!currentSession || !currentGuestId) return null;
+
+  const me = currentSession.guests.find((g) => g.id === currentGuestId);
+  if (!me) return null;
+
+  const submitted = me.hasVoted;
 
   const toggle = (id: string) => {
     if (selected.includes(id)) {
@@ -108,7 +100,6 @@ export function GuestVotingView() {
   const handleSubmit = () => {
     if (me && selected.length === 3) {
       submitVotes(me.id, selected);
-      setSubmitted(true);
     }
   };
 

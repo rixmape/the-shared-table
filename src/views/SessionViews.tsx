@@ -1,7 +1,7 @@
 import { MobileShell, ViewHeader } from "@/components/MobileShell";
-import { Input } from "@/components/ui/input";
 import { useApp } from "@/context/AppContext";
-import { useState } from "react";
+import { generateSessionQR } from "@/utils/qrCode";
+import { useEffect, useState } from "react";
 
 export function CreateSessionView() {
   const { setView, createSession } = useApp();
@@ -43,18 +43,23 @@ export function CreateSessionView() {
 }
 
 export function HostLobbyView() {
-  const { setView, currentSession, addSimGuest, advancePhase, endSession } = useApp();
-  const [guestName, setGuestName] = useState("");
+  const { setView, currentSession, advancePhase, endSession } = useApp();
+  const [qrCode, setQrCode] = useState<string>("");
 
+  // Generate QR code when session code is available
+  useEffect(() => {
+    if (currentSession?.code) {
+      generateSessionQR(currentSession.code)
+        .then(setQrCode)
+        .catch((err) => {
+          console.error("Error generating QR code:", err);
+        });
+    }
+  }, [currentSession?.code]);
+
+  // Early return AFTER all hooks
   if (!currentSession) return null;
   const { code, guests } = currentSession;
-
-  const handleAddGuest = () => {
-    if (guestName.trim() && !guests.find((g) => g.nickname.toLowerCase() === guestName.trim().toLowerCase())) {
-      addSimGuest(guestName.trim());
-      setGuestName("");
-    }
-  };
 
   return (
     <MobileShell>
@@ -78,42 +83,14 @@ export function HostLobbyView() {
         <div className="bg-stone-900 rounded-2xl p-6 text-center mb-5">
           <p className="text-stone-400 text-[10px] uppercase tracking-[0.2em] mb-2">Session Code</p>
           <p className="text-4xl font-bold text-white tracking-[0.15em] font-mono">{code}</p>
-          <p className="text-stone-500 text-xs mt-3">Share this code with your guests</p>
-          {/* Simple QR placeholder */}
-          <div className="mx-auto mt-4 w-28 h-28 bg-white rounded-xl flex items-center justify-center">
-            <div className="grid grid-cols-5 gap-[2px]">
-              {Array.from({ length: 25 }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`w-4 h-4 rounded-[2px] ${
-                    [0, 1, 2, 3, 4, 5, 9, 10, 14, 15, 19, 20, 21, 22, 23, 24, 6, 8, 12, 16, 18].includes(i)
-                      ? "bg-stone-900"
-                      : "bg-stone-200"
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Add guest (simulation) */}
-        <div className="mb-4">
-          <p className="text-[10px] text-stone-400 uppercase tracking-wider mb-2 font-medium">Simulate Guest Joining</p>
-          <div className="flex gap-2">
-            <Input
-              placeholder="Guest nickname..."
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddGuest()}
-              className="h-10 rounded-lg text-sm bg-white border-stone-200 flex-1"
-            />
-            <button
-              onClick={handleAddGuest}
-              disabled={!guestName.trim()}
-              className="h-10 px-4 rounded-lg bg-stone-900 text-white text-sm font-medium disabled:opacity-40 shrink-0"
-            >
-              Join
-            </button>
+          <p className="text-stone-500 text-xs mt-3">Guests can scan this QR code to join</p>
+          {/* Real QR code */}
+          <div className="mx-auto mt-4 w-48 h-48 bg-white rounded-xl flex items-center justify-center p-3">
+            {qrCode ? (
+              <img src={qrCode} alt="Session QR Code" className="w-full h-full" />
+            ) : (
+              <div className="animate-pulse bg-stone-200 w-full h-full rounded-lg" />
+            )}
           </div>
         </div>
 

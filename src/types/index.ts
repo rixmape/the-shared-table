@@ -1,12 +1,16 @@
 export interface Topic {
   id: string;
   name: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Question {
   id: string;
   topicId: string;
   text: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Guest {
@@ -15,6 +19,8 @@ export interface Guest {
   hasVoted: boolean;
   hasPicked: boolean;
   pickedQuestionId?: string;
+  sessionId?: string;
+  joined_at?: string;
 }
 
 export interface PickedQuestion {
@@ -49,6 +55,9 @@ export interface Session {
   pickedQuestions: PickedQuestion[];
   currentRound: number;
   startTime: string;
+  endTime?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type AppView =

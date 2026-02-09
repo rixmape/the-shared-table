@@ -1,100 +1,65 @@
-import type { AppView, Guest, PickedQuestion, Question, Session, SessionPhase, SessionRecord, Topic } from "@/types";
-import { createContext, ReactNode, useCallback, useContext, useState } from "react";
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 10);
-}
-
-function generateSessionCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
-
-// Default topics and questions for demo
-const DEFAULT_TOPICS: Topic[] = [
-  { id: "t1", name: "Family" },
-  { id: "t2", name: "Dreams & Ambitions" },
-  { id: "t3", name: "Childhood Memories" },
-  { id: "t4", name: "Travel & Adventure" },
-  { id: "t5", name: "Food & Culture" },
-  { id: "t6", name: "Love & Relationships" },
-  { id: "t7", name: "Life Lessons" },
-  { id: "t8", name: "Fears & Courage" },
-];
-
-const DEFAULT_QUESTIONS: Question[] = [
-  { id: "q1", topicId: "t1", text: "What's a meal that reminds you of home?" },
-  { id: "q2", topicId: "t1", text: "Who in your family has influenced you the most, and how?" },
-  { id: "q3", topicId: "t1", text: "What's a family tradition you'd love to keep alive?" },
-  { id: "q4", topicId: "t1", text: "What's the best advice a family member ever gave you?" },
-  { id: "q5", topicId: "t2", text: "What's a dream you've never told anyone about?" },
-  { id: "q6", topicId: "t2", text: "If money were no object, what would you do with your life?" },
-  { id: "q7", topicId: "t2", text: "What's one goal you're quietly working toward right now?" },
-  { id: "q8", topicId: "t2", text: "What did you want to be when you were ten years old?" },
-  { id: "q9", topicId: "t3", text: "What's your earliest memory?" },
-  { id: "q10", topicId: "t3", text: "What game did you play most as a kid?" },
-  { id: "q11", topicId: "t3", text: "What's a childhood smell that takes you right back?" },
-  { id: "q12", topicId: "t3", text: "Who was your childhood best friend, and where are they now?" },
-  { id: "q13", topicId: "t4", text: "What's the most beautiful place you've ever visited?" },
-  { id: "q14", topicId: "t4", text: "Where in the world would you go if you could leave tomorrow?" },
-  { id: "q15", topicId: "t4", text: "What's a trip that changed the way you see the world?" },
-  { id: "q16", topicId: "t4", text: "What's the strangest food you've tried while traveling?" },
-  { id: "q17", topicId: "t5", text: "What's your ultimate comfort food?" },
-  { id: "q18", topicId: "t5", text: "If you could only eat one cuisine for the rest of your life, which would it be?" },
-  { id: "q19", topicId: "t5", text: "What's a dish you've always wanted to learn how to cook?" },
-  { id: "q20", topicId: "t5", text: "What's a cultural practice from another country that you admire?" },
-  { id: "q21", topicId: "t6", text: "What's the most important lesson love has taught you?" },
-  { id: "q22", topicId: "t6", text: "How do you show someone you care about them?" },
-  { id: "q23", topicId: "t6", text: "What's the kindest thing someone has ever done for you?" },
-  { id: "q24", topicId: "t6", text: "What does a perfect day with someone you love look like?" },
-  { id: "q25", topicId: "t7", text: "What's a mistake that turned out to be a blessing?" },
-  { id: "q26", topicId: "t7", text: "What's something you believed strongly five years ago but don't anymore?" },
-  { id: "q27", topicId: "t7", text: "What's the hardest truth you've had to accept?" },
-  { id: "q28", topicId: "t7", text: "What would you tell your younger self?" },
-  { id: "q29", topicId: "t8", text: "What's something you're afraid of that most people aren't?" },
-  { id: "q30", topicId: "t8", text: "What's the bravest thing you've ever done?" },
-  { id: "q31", topicId: "t8", text: "When was the last time you did something for the first time?" },
-  { id: "q32", topicId: "t8", text: "What fear have you overcome that you're proud of?" },
-];
+import { ConnectionHealth } from "@/hooks/usePolling";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import { useSupabaseTopics } from "@/hooks/useSupabaseTopics";
+import { supabase } from "@/lib/supabase";
+import * as guestService from "@/services/guestService";
+import * as questionService from "@/services/questionService";
+import * as sessionService from "@/services/sessionService";
+import type { AppView, Question, Session, SessionPhase, SessionRecord, Topic } from "@/types";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
 
 interface AppState {
   view: AppView;
-  topics: Topic[];
-  questions: Question[];
   sessions: SessionRecord[];
-  currentSession: Session | null;
+  currentSessionId: string | null;
   currentGuestId: string | null;
-  isAdmin: boolean;
 }
 
 interface AppContextType extends AppState {
+  // Derived from hooks
+  topics: Topic[];
+  questions: Question[];
+  currentSession: Session | null;
+  isAdmin: boolean;
+  loading: boolean;
+  connected: boolean;
+  connectionHealth?: ConnectionHealth;
+  lastUpdate?: Date | null;
+
   setView: (v: AppView) => void;
+
   // Admin
-  login: (password: string) => boolean;
-  logout: () => void;
-  addTopic: (name: string) => void;
-  editTopic: (id: string, name: string) => void;
-  removeTopic: (id: string) => void;
-  addQuestion: (topicId: string, text: string) => void;
-  editQuestion: (id: string, text: string, topicId: string) => void;
-  removeQuestion: (id: string) => void;
-  deleteSessionRecord: (id: string) => void;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  addTopic: (name: string) => Promise<void>;
+  editTopic: (id: string, name: string) => Promise<void>;
+  removeTopic: (id: string) => Promise<void>;
+  addQuestion: (topicId: string, text: string) => Promise<void>;
+  editQuestion: (id: string, text: string, topicId: string) => Promise<void>;
+  removeQuestion: (id: string) => Promise<void>;
+  deleteSessionRecord: (id: string) => Promise<void>;
+
   // Session
-  createSession: () => void;
-  joinSession: (code: string, nickname: string) => string | null;
-  addSimGuest: (nickname: string) => void;
-  advancePhase: (phase: SessionPhase) => void;
+  createSession: () => Promise<void>;
+  joinSession: (code: string, nickname: string) => Promise<{ success: boolean; error?: string; guestId?: string }>;
+  advancePhase: (phase: SessionPhase) => Promise<void>;
+
   // Voting
-  submitVotes: (guestId: string, topicIds: string[]) => void;
-  simGuestVotes: () => void;
+  submitVotes: (guestId: string, topicIds: string[]) => Promise<void>;
+
   // Topic confirm
-  confirmTopics: (topicIds: string[]) => void;
+  confirmTopics: (topicIds: string[]) => Promise<void>;
+
   // Question
-  pickQuestion: (guestId: string) => Question | null;
-  nextRound: () => void;
-  endSession: () => void;
+  pickQuestion: (guestId: string) => Promise<Question | null>;
+  nextRound: () => Promise<void>;
+  endSession: () => Promise<void>;
+
+  // Refresh functions
+  refetchTopics: () => void;
+  refetchSession: () => void;
+  loadSessionHistory: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -102,118 +67,257 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>({
     view: "home",
-    topics: DEFAULT_TOPICS,
-    questions: DEFAULT_QUESTIONS,
     sessions: [],
-    currentSession: null,
+    currentSessionId: null,
     currentGuestId: null,
-    isAdmin: false,
   });
+
+  // Use hooks for Supabase integration
+  const auth = useSupabaseAuth();
+  const topicsHook = useSupabaseTopics();
+  const sessionHook = useSupabaseSession({
+    sessionId: state.currentSessionId,
+    topics: topicsHook.topics,
+    questions: topicsHook.questions,
+  });
+
+  // Load session history when admin logs in
+  useEffect(() => {
+    if (auth.isAuthenticated) {
+      loadSessionHistory();
+    }
+  }, [auth.isAuthenticated]);
+
+  // Sync guest view with session phase changes
+  useEffect(() => {
+    // Only run for guests (not hosts or admins)
+    if (!state.currentGuestId || !sessionHook.session) {
+      return;
+    }
+
+    const currentPhase = sessionHook.session.phase;
+
+    // Map session phase to guest view
+    const phaseToViewMap: Record<SessionPhase, AppView> = {
+      lobby: "guestLobby",
+      voting: "guestVoting",
+      topicResults: "guestVoting", // Guests wait during host topic selection
+      topicReveal: "guestVoting", // Guests wait during topic reveal
+      questionPhase: "guestQuestionPhase",
+      ended: "guestEnded",
+    };
+
+    const targetView = phaseToViewMap[currentPhase];
+
+    // Only update view if it differs from target (prevent infinite loops)
+    if (state.view !== targetView) {
+      console.log(
+        `[Guest View Sync] Phase changed to '${currentPhase}', updating view from '${state.view}' to '${targetView}'`,
+      );
+      setState((s) => ({ ...s, view: targetView }));
+    }
+  }, [state.currentGuestId, sessionHook.session?.phase, state.view]);
 
   const setView = useCallback((view: AppView) => {
     setState((s) => ({ ...s, view }));
   }, []);
 
   // ─── Admin ───
-  const login = useCallback((password: string): boolean => {
-    if (password === "sharedtable2026") {
-      setState((s) => ({ ...s, isAdmin: true, view: "admin" }));
-      return true;
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const result = await auth.login(email, password);
+      if (result.success) {
+        setState((s) => ({ ...s, view: "admin" }));
+      }
+      return result;
+    },
+    [auth],
+  );
+
+  const logout = useCallback(async () => {
+    await auth.logout();
+    setState((s) => ({ ...s, view: "home", currentSessionId: null, currentGuestId: null }));
+  }, [auth]);
+
+  const addTopic = useCallback(
+    async (name: string) => {
+      try {
+        const { error } = await supabase.from("topics").insert({ name });
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error adding topic:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const editTopic = useCallback(
+    async (id: string, name: string) => {
+      try {
+        const { error } = await supabase.from("topics").update({ name }).eq("id", id);
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error editing topic:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const removeTopic = useCallback(
+    async (id: string) => {
+      try {
+        // Questions will be cascade deleted due to ON DELETE CASCADE
+        const { error } = await supabase.from("topics").delete().eq("id", id);
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error removing topic:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const addQuestion = useCallback(
+    async (topicId: string, text: string) => {
+      try {
+        const { error } = await supabase.from("questions").insert({ topic_id: topicId, text });
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error adding question:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const editQuestion = useCallback(
+    async (id: string, text: string, topicId: string) => {
+      try {
+        const { error } = await supabase.from("questions").update({ text, topic_id: topicId }).eq("id", id);
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error editing question:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const removeQuestion = useCallback(
+    async (id: string) => {
+      try {
+        const { error } = await supabase.from("questions").delete().eq("id", id);
+
+        if (error) throw error;
+
+        topicsHook.refetch();
+      } catch (err) {
+        console.error("Error removing question:", err);
+      }
+    },
+    [topicsHook],
+  );
+
+  const deleteSessionRecord = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase.from("session_records").delete().eq("id", id);
+
+      if (error) throw error;
+
+      await loadSessionHistory();
+    } catch (err) {
+      console.error("Error deleting session record:", err);
     }
-    return false;
   }, []);
 
-  const logout = useCallback(() => {
-    setState((s) => ({ ...s, isAdmin: false, view: "home" }));
-  }, []);
+  const loadSessionHistory = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("session_records")
+        .select("*")
+        .order("end_time", { ascending: false });
 
-  const addTopic = useCallback((name: string) => {
-    setState((s) => ({ ...s, topics: [...s.topics, { id: generateId(), name }] }));
-  }, []);
+      if (error) throw error;
 
-  const editTopic = useCallback((id: string, name: string) => {
-    setState((s) => ({
-      ...s,
-      topics: s.topics.map((t) => (t.id === id ? { ...t, name } : t)),
-    }));
-  }, []);
+      const records: SessionRecord[] = (data || []).map((record: any) => ({
+        id: record.id,
+        code: record.code,
+        startTime: record.start_time,
+        endTime: record.end_time,
+        guestCount: record.guest_count,
+        guests: record.guests_json.map((g: any) => g.nickname),
+        confirmedTopics: record.confirmed_topics_json.map((t: any) => t.topics?.name || "Unknown"),
+        pickedQuestions: record.picked_questions_json.map((pq: any) => ({
+          questionId: pq.question_id,
+          questionText: pq.questions?.text || "",
+          topicName: pq.questions?.topics?.name || "Unknown",
+          guestNickname: pq.guests?.nickname || "Unknown",
+          round: pq.round,
+        })),
+      }));
 
-  const removeTopic = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      topics: s.topics.filter((t) => t.id !== id),
-      questions: s.questions.filter((q) => q.topicId !== id),
-    }));
-  }, []);
-
-  const addQuestion = useCallback((topicId: string, text: string) => {
-    setState((s) => ({
-      ...s,
-      questions: [...s.questions, { id: generateId(), topicId, text }],
-    }));
-  }, []);
-
-  const editQuestion = useCallback((id: string, text: string, topicId: string) => {
-    setState((s) => ({
-      ...s,
-      questions: s.questions.map((q) => (q.id === id ? { ...q, text, topicId } : q)),
-    }));
-  }, []);
-
-  const removeQuestion = useCallback((id: string) => {
-    setState((s) => ({ ...s, questions: s.questions.filter((q) => q.id !== id) }));
-  }, []);
-
-  const deleteSessionRecord = useCallback((id: string) => {
-    setState((s) => ({ ...s, sessions: s.sessions.filter((sr) => sr.id !== id) }));
+      setState((s) => ({ ...s, sessions: records }));
+    } catch (err) {
+      console.error("Error loading session history:", err);
+    }
   }, []);
 
   // ─── Session ───
-  const createSession = useCallback(() => {
-    const session: Session = {
-      id: generateId(),
-      code: generateSessionCode(),
-      phase: "lobby",
-      guests: [],
-      votes: {},
-      confirmedTopics: [],
-      questionPool: [],
-      pickedQuestions: [],
-      currentRound: 1,
-      startTime: new Date().toISOString(),
-    };
-    setState((s) => ({ ...s, currentSession: session, view: "hostLobby" }));
-  }, []);
-
-  const joinSession = useCallback((_code: string, _nickname: string): string | null => {
-    return null; // actual joining handled via state
-  }, []);
-
-  const addSimGuest = useCallback((nickname: string) => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      const guest: Guest = {
-        id: generateId(),
-        nickname,
-        hasVoted: false,
-        hasPicked: false,
-      };
-      return {
+  const createSession = useCallback(async () => {
+    const result = await sessionService.createSession();
+    if (result.success && result.session) {
+      setState((s) => ({
         ...s,
-        currentSession: {
-          ...s.currentSession,
-          guests: [...s.currentSession.guests, guest],
-        },
-      };
-    });
+        currentSessionId: result.session!.id,
+        view: "hostLobby",
+      }));
+    }
   }, []);
 
-  const advancePhase = useCallback((phase: SessionPhase) => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      return {
+  const joinSession = useCallback(async (code: string, nickname: string) => {
+    // Validate session code
+    const validation = await sessionService.validateSessionCode(code);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
+    // Join session
+    const result = await guestService.joinSession(validation.session!.id, nickname);
+    if (result.success && result.guest) {
+      setState((s) => ({
         ...s,
-        currentSession: { ...s.currentSession, phase },
+        currentSessionId: validation.session!.id,
+        currentGuestId: result.guest!.id,
+        view: validation.session!.phase === "lobby" ? "guestLobby" : "guestVoting",
+      }));
+
+      return { success: true, guestId: result.guest.id };
+    }
+
+    return { success: false, error: result.error };
+  }, []);
+
+  const advancePhase = useCallback(
+    async (phase: SessionPhase) => {
+      if (!state.currentSessionId) return;
+
+      await sessionService.advancePhase(state.currentSessionId, phase);
+
+      // Update local view based on phase
+      setState((s) => ({
+        ...s,
         view:
           phase === "voting"
             ? "hostVoting"
@@ -224,142 +328,98 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 : phase === "questionPhase"
                   ? "hostQuestionPhase"
                   : s.view,
-      };
-    });
-  }, []);
+      }));
+    },
+    [state.currentSessionId],
+  );
 
   // ─── Voting ───
-  const submitVotes = useCallback((guestId: string, topicIds: string[]) => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      return {
-        ...s,
-        currentSession: {
-          ...s.currentSession,
-          votes: { ...s.currentSession.votes, [guestId]: topicIds },
-          guests: s.currentSession.guests.map((g) => (g.id === guestId ? { ...g, hasVoted: true } : g)),
-        },
-      };
-    });
-  }, []);
+  const submitVotes = useCallback(
+    async (guestId: string, topicIds: string[]) => {
+      if (!state.currentSessionId) return;
 
-  const simGuestVotes = useCallback(() => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      const newVotes = { ...s.currentSession.votes };
-      const updatedGuests = s.currentSession.guests.map((g) => {
-        if (!g.hasVoted) {
-          const shuffled = [...s.topics].sort(() => Math.random() - 0.5);
-          newVotes[g.id] = shuffled.slice(0, 3).map((t) => t.id);
-          return { ...g, hasVoted: true };
-        }
-        return g;
-      });
-      return {
-        ...s,
-        currentSession: {
-          ...s.currentSession,
-          votes: newVotes,
-          guests: updatedGuests,
-        },
-      };
-    });
-  }, []);
+      await guestService.submitVote(state.currentSessionId, guestId, topicIds);
+    },
+    [state.currentSessionId],
+  );
 
   // ─── Topic Confirm ───
-  const confirmTopics = useCallback((topicIds: string[]) => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      const confirmed = s.topics.filter((t) => topicIds.includes(t.id));
-      const pool = s.questions.filter((q) => topicIds.includes(q.topicId));
-      return {
-        ...s,
-        currentSession: {
-          ...s.currentSession,
-          confirmedTopics: confirmed,
-          questionPool: pool.sort(() => Math.random() - 0.5),
-          phase: "topicReveal",
-        },
-        view: "topicReveal",
-      };
-    });
-  }, []);
+  const confirmTopics = useCallback(
+    async (topicIds: string[]) => {
+      if (!state.currentSessionId) return;
+
+      await questionService.confirmTopics(state.currentSessionId, topicIds);
+
+      // Advance to topic reveal
+      await sessionService.advancePhase(state.currentSessionId, "topicReveal");
+
+      setState((s) => ({ ...s, view: "topicReveal" }));
+    },
+    [state.currentSessionId],
+  );
 
   // ─── Question ───
-  const pickQuestion = useCallback((guestId: string): Question | null => {
-    let picked: Question | null = null;
-    setState((s) => {
-      if (!s.currentSession || s.currentSession.questionPool.length === 0) return s;
-      const q = s.currentSession.questionPool[0];
-      picked = q;
-      const guest = s.currentSession.guests.find((g) => g.id === guestId);
-      const topic = s.topics.find((t) => t.id === q.topicId);
-      const pq: PickedQuestion = {
-        questionId: q.id,
-        questionText: q.text,
-        topicName: topic?.name || "Unknown",
-        guestNickname: guest?.nickname || "Unknown",
-        round: s.currentSession.currentRound,
-      };
-      return {
-        ...s,
-        currentSession: {
-          ...s.currentSession,
-          questionPool: s.currentSession.questionPool.slice(1),
-          pickedQuestions: [...s.currentSession.pickedQuestions, pq],
-          guests: s.currentSession.guests.map((g) =>
-            g.id === guestId ? { ...g, hasPicked: true, pickedQuestionId: q.id } : g,
-          ),
-        },
-      };
-    });
-    return picked;
-  }, []);
+  const pickQuestion = useCallback(
+    async (guestId: string): Promise<Question | null> => {
+      if (!state.currentSessionId || !sessionHook.session) return null;
 
-  const nextRound = useCallback(() => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      return {
-        ...s,
-        currentSession: {
-          ...s.currentSession,
-          currentRound: s.currentSession.currentRound + 1,
-          guests: s.currentSession.guests.map((g) => ({
-            ...g,
-            hasPicked: false,
-            pickedQuestionId: undefined,
-          })),
-        },
-      };
-    });
-  }, []);
+      const result = await questionService.pickQuestion(
+        state.currentSessionId,
+        guestId,
+        sessionHook.session.currentRound,
+      );
 
-  const endSession = useCallback(() => {
-    setState((s) => {
-      if (!s.currentSession) return s;
-      const record: SessionRecord = {
-        id: s.currentSession.id,
-        code: s.currentSession.code,
-        startTime: s.currentSession.startTime,
-        endTime: new Date().toISOString(),
-        guests: s.currentSession.guests.map((g) => g.nickname),
-        guestCount: s.currentSession.guests.length,
-        confirmedTopics: s.currentSession.confirmedTopics.map((t) => t.name),
-        pickedQuestions: s.currentSession.pickedQuestions,
-      };
-      return {
-        ...s,
-        sessions: [...s.sessions, record],
-        currentSession: { ...s.currentSession, phase: "ended" },
-        view: "hostEnded",
-      };
-    });
-  }, []);
+      if (result.success && result.question) {
+        return {
+          id: result.question.id,
+          text: result.question.text,
+          topicId: result.question.topicId,
+        };
+      }
+
+      return null;
+    },
+    [state.currentSessionId, sessionHook.session],
+  );
+
+  const nextRound = useCallback(async () => {
+    if (!state.currentSessionId || !sessionHook.session) return;
+
+    // Reset picks
+    await questionService.resetPicksForNextRound(state.currentSessionId);
+
+    // Update round number
+    await supabase
+      .from("sessions")
+      .update({ current_round: sessionHook.session.currentRound + 1 })
+      .eq("id", state.currentSessionId);
+  }, [state.currentSessionId, sessionHook.session]);
+
+  const endSession = useCallback(async () => {
+    if (!state.currentSessionId) return;
+
+    await sessionService.endSession(state.currentSessionId);
+
+    setState((s) => ({ ...s, view: "hostEnded" }));
+
+    // Reload session history
+    if (auth.isAuthenticated) {
+      await loadSessionHistory();
+    }
+  }, [state.currentSessionId, auth.isAuthenticated, loadSessionHistory]);
 
   return (
     <AppContext.Provider
       value={{
         ...state,
+        topics: topicsHook.topics,
+        questions: topicsHook.questions,
+        currentSession: sessionHook.session,
+        isAdmin: auth.isAuthenticated,
+        loading: auth.loading || topicsHook.loading || sessionHook.loading,
+        connected: sessionHook.connected,
+        connectionHealth: sessionHook.connectionHealth,
+        lastUpdate: sessionHook.lastUpdate,
         setView,
         login,
         logout,
@@ -372,14 +432,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         deleteSessionRecord,
         createSession,
         joinSession,
-        addSimGuest,
         advancePhase,
         submitVotes,
-        simGuestVotes,
         confirmTopics,
         pickQuestion,
         nextRound,
         endSession,
+        refetchTopics: topicsHook.refetch,
+        refetchSession: sessionHook.refetch,
+        loadSessionHistory,
       }}
     >
       {children}

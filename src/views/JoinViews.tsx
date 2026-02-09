@@ -4,36 +4,37 @@ import { useApp } from "@/context/AppContext";
 import { useState } from "react";
 
 export function JoinSessionView() {
-  const { setView, currentSession, addSimGuest } = useApp();
+  const { joinSession, setView } = useApp();
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState("");
   const [step, setStep] = useState<"code" | "nickname">("code");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleCodeSubmit = () => {
-    if (!currentSession) {
-      setError("No active session. Ask the host to create one first.");
-      return;
-    }
-    if (code.toUpperCase() !== currentSession.code) {
-      setError("Session not found. Check the code and try again.");
-      return;
-    }
+  const handleCodeSubmit = async () => {
     setError("");
     setStep("nickname");
   };
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!nickname.trim()) {
       setError("Please enter a nickname.");
       return;
     }
-    if (currentSession?.guests.find((g) => g.nickname.toLowerCase() === nickname.trim().toLowerCase())) {
-      setError("That nickname is taken. Pick another.");
+
+    setLoading(true);
+    setError("");
+
+    const result = await joinSession(code.toUpperCase(), nickname.trim());
+
+    if (!result.success) {
+      setError(result.error || "Failed to join session");
+      setLoading(false);
       return;
     }
-    addSimGuest(nickname.trim());
-    setView("guestLobby");
+
+    // View will be automatically updated by joinSession
+    setLoading(false);
   };
 
   return (
@@ -114,10 +115,10 @@ export function JoinSessionView() {
             {error && <p className="text-red-500 text-xs mt-2 text-center">{error}</p>}
             <button
               onClick={handleJoin}
-              disabled={!nickname.trim()}
+              disabled={!nickname.trim() || loading}
               className="w-full h-12 rounded-xl bg-amber-800 text-amber-50 font-semibold text-sm mt-4 disabled:opacity-40 hover:bg-amber-900 transition-colors active:scale-[0.98]"
             >
-              Join Table
+              {loading ? "Joining..." : "Join Table"}
             </button>
           </>
         )}

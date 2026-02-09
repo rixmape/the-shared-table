@@ -3,17 +3,12 @@ import { useApp } from "@/context/AppContext";
 import { useState } from "react";
 
 export function HostQuestionPhaseView() {
-  const { currentSession, nextRound, endSession, pickQuestion } = useApp();
+  const { currentSession, nextRound, endSession } = useApp();
   if (!currentSession) return null;
 
   const { guests, currentRound, questionPool, pickedQuestions } = currentSession;
   const allPicked = guests.every((g) => g.hasPicked);
   const poolEmpty = questionPool.length === 0;
-
-  // Simulate a guest picking
-  const simPick = (guestId: string) => {
-    pickQuestion(guestId);
-  };
 
   return (
     <MobileShell>
@@ -51,14 +46,7 @@ export function HostQuestionPhaseView() {
                       )}
                     </div>
                   </div>
-                  {!g.hasPicked && !poolEmpty && (
-                    <button
-                      onClick={() => simPick(g.id)}
-                      className="text-xs font-medium text-amber-700 bg-amber-100 px-3 py-1.5 rounded-lg hover:bg-amber-200 transition-colors"
-                    >
-                      Sim Pick
-                    </button>
-                  )}
+                  {!g.hasPicked && !poolEmpty && <span className="text-xs text-stone-400">Waiting...</span>}
                 </div>
               </div>
             );
@@ -104,19 +92,22 @@ export function HostQuestionPhaseView() {
 }
 
 export function GuestQuestionPhaseView() {
-  const { currentSession, pickQuestion } = useApp();
+  const { currentSession, currentGuestId, pickQuestion } = useApp();
   const [myQuestion, setMyQuestion] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  if (!currentSession) return null;
-  const me = currentSession.guests[currentSession.guests.length - 1];
+  if (!currentSession || !currentGuestId) return null;
+
+  const me = currentSession.guests.find((g) => g.id === currentGuestId);
+  if (!me) return null;
+
   const poolEmpty = currentSession.questionPool.length === 0;
 
-  const handlePick = () => {
+  const handlePick = async () => {
     if (!me || poolEmpty) return;
     setIsAnimating(true);
-    setTimeout(() => {
-      const q = pickQuestion(me.id);
+    setTimeout(async () => {
+      const q = await pickQuestion(me.id);
       if (q) setMyQuestion(q.text);
       setIsAnimating(false);
     }, 800);
