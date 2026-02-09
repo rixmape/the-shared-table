@@ -1,6 +1,6 @@
 import { MobileShell, ViewHeader } from "@/components/MobileShell";
 import { useApp } from "@/context/AppContext";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function HostQuestionPhaseView() {
   const { currentSession, nextRound, endSession } = useApp();
@@ -94,6 +94,7 @@ export function HostQuestionPhaseView() {
 export function GuestQuestionPhaseView() {
   const { currentSession, currentGuestId, pickQuestion } = useApp();
   const [myQuestion, setMyQuestion] = useState<string | null>(null);
+  const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
   if (!currentSession || !currentGuestId) return null;
@@ -108,10 +109,23 @@ export function GuestQuestionPhaseView() {
     setIsAnimating(true);
     setTimeout(async () => {
       const q = await pickQuestion(me.id);
-      if (q) setMyQuestion(q.text);
+      if (q) {
+        setMyQuestion(q.text);
+        setMyQuestionRound(currentSession.currentRound);
+      }
       setIsAnimating(false);
     }, 800);
   };
+
+  // Reset local state when a new round starts
+  useEffect(() => {
+    // If we have a question from a previous round, clear it
+    if (myQuestion && myQuestionRound !== null && myQuestionRound < currentSession.currentRound) {
+      console.log(`[Guest] Round changed from ${myQuestionRound} to ${currentSession.currentRound}, clearing question`);
+      setMyQuestion(null);
+      setMyQuestionRound(null);
+    }
+  }, [currentSession.currentRound, myQuestion, myQuestionRound]);
 
   return (
     <MobileShell>

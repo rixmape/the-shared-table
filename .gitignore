@@ -61,5 +61,6 @@ Thumbs.db
 # Optional stylelint cache
 .stylelintcache
 
-# Archive (soft-deleted files)
+# User-specific files
 .archive
+CLAUDE.md
