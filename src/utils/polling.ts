@@ -9,9 +9,23 @@ import { Guest, PickedQuestion, SessionPhase } from "../types";
  * Merges new guests into existing guest list without duplicates
  */
 export const mergeGuests = (existing: Guest[], newGuests: Guest[]): Guest[] => {
-  const existingIds = new Set(existing.map((g) => g.id));
-  const additions = newGuests.filter((g) => !existingIds.has(g.id));
-  return [...existing, ...additions];
+  // Create a map of new guests by ID for O(1) lookup
+  const newGuestsMap = new Map(newGuests.map((g) => [g.id, g]));
+
+  // Update existing guests or keep them unchanged
+  const merged = existing.map((existingGuest) => {
+    const updated = newGuestsMap.get(existingGuest.id);
+    if (updated) {
+      // Remove from map so we don't add duplicates
+      newGuestsMap.delete(existingGuest.id);
+      return updated;
+    }
+    return existingGuest;
+  });
+
+  // Add any truly new guests that weren't in existing array
+  const additions = Array.from(newGuestsMap.values());
+  return [...merged, ...additions];
 };
 
 /**

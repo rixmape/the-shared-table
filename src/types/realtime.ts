@@ -12,6 +12,7 @@ export type RealtimeConnectionState = "DISCONNECTED" | "CONNECTING" | "CONNECTED
 
 export interface RealtimeCallbacks {
   onGuestInsert?: (payload: RealtimePayload) => void;
+  onGuestUpdate?: (payload: RealtimePayload) => void;
   onVoteInsert?: (payload: RealtimePayload) => void;
   onPickedQuestionInsert?: (payload: RealtimePayload) => void;
   onSessionTopicInsert?: (payload: RealtimePayload) => void;

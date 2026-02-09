@@ -328,6 +328,40 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     });
   }, []);
 
+  const handleRealtimeGuestUpdate = useCallback((payload: RealtimePayload) => {
+    // payload.new is already transformed by useSupabaseRealtime
+    const updatedGuest: Guest = {
+      id: payload.new.id,
+      sessionId: payload.new.sessionId,
+      nickname: payload.new.nickname,
+      hasVoted: payload.new.hasVoted || false,
+      hasPicked: payload.new.hasPicked || false,
+      pickedQuestionId: payload.new.pickedQuestionId || null,
+      joined_at: payload.new.joinedAt,
+    };
+
+    setSession((prev) => {
+      if (!prev) return prev;
+
+      // Find and update the guest
+      const guestIndex = prev.guests.findIndex((g) => g.id === updatedGuest.id);
+      if (guestIndex === -1) {
+        console.log("[Realtime] Guest not found for update, ignoring:", updatedGuest.id);
+        return prev;
+      }
+
+      const updatedGuests = [...prev.guests];
+      updatedGuests[guestIndex] = updatedGuest;
+
+      console.log("[Realtime] Updating guest:", updatedGuest.nickname, {
+        hasVoted: updatedGuest.hasVoted,
+        hasPicked: updatedGuest.hasPicked,
+      });
+
+      return { ...prev, guests: updatedGuests };
+    });
+  }, []);
+
   const handleRealtimeVoteInsert = useCallback((payload: RealtimePayload) => {
     const vote = {
       guestId: payload.new.guestId,
@@ -435,6 +469,7 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     sessionId,
     enabled: REALTIME_ENABLED && connectionMode.mode === "realtime",
     onGuestInsert: handleRealtimeGuestInsert,
+    onGuestUpdate: handleRealtimeGuestUpdate,
     onVoteInsert: handleRealtimeVoteInsert,
     onPickedQuestionInsert: handleRealtimePickedQuestionInsert,
     onSessionTopicInsert: handleRealtimeSessionTopicInsert,

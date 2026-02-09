@@ -15,6 +15,7 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
     sessionId,
     enabled = true,
     onGuestInsert,
+    onGuestUpdate,
     onVoteInsert,
     onPickedQuestionInsert,
     onSessionTopicInsert,
@@ -162,6 +163,27 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
         setLastUpdate(new Date());
         if (onGuestInsert) {
           onGuestInsert({
+            ...payload,
+            new: transformGuest(payload.new),
+          });
+        }
+      },
+    );
+
+    // Subscribe to guests table - UPDATE events
+    channel.on(
+      REALTIME_LISTEN_TYPES.POSTGRES_CHANGES,
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "guests",
+        filter: `session_id=eq.${sessionId}`,
+      },
+      (payload: RealtimePayload) => {
+        console.log("[Realtime] Guest updated:", payload);
+        setLastUpdate(new Date());
+        if (onGuestUpdate) {
+          onGuestUpdate({
             ...payload,
             new: transformGuest(payload.new),
           });
@@ -320,6 +342,7 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
     enabled,
     sessionId,
     onGuestInsert,
+    onGuestUpdate,
     onVoteInsert,
     onPickedQuestionInsert,
     onSessionTopicInsert,
