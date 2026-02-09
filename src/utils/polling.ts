@@ -57,19 +57,19 @@ export const mergePickedQuestions = (existing: PickedQuestion[], newPicks: Picke
 export const getIntervalForPhase = (phase: SessionPhase): number => {
   switch (phase) {
     case "lobby":
-      return 2000; // 2s - guests joining frequently
+      return 1000; // 1s - guests joining frequently
     case "voting":
-      return 2000; // 2s - votes coming in, critical for UX
+      return 1000; // 1s - votes coming in, critical for UX
     case "topicResults":
-      return 5000; // 5s - mostly static display
+      return 1000; // 1s - mostly static display
     case "topicReveal":
-      return 5000; // 5s - mostly static display
+      return 1000; // 1s - mostly static display
     case "questionPhase":
-      return 2500; // 2.5s - guests picking questions
+      return 1000; // 1s - guests picking questions
     case "ended":
       return 0; // Stop polling - session inactive
     default:
-      return 3000; // 3s - default fallback
+      return 1000; // 1s - default fallback
   }
 };
 
