@@ -64,15 +64,24 @@ export function HostVotingView() {
           </div>
         )}
 
-        {/* Proceed */}
-        {allVoted && (
+        {/* Proceed buttons */}
+        <div className="space-y-3">
           <button
             onClick={() => advancePhase("topicResults")}
-            className="w-full h-14 rounded-2xl bg-amber-800 text-amber-50 font-semibold text-[15px] hover:bg-amber-900 transition-colors active:scale-[0.98]"
+            disabled={!allVoted}
+            className="w-full h-14 rounded-2xl bg-amber-800 text-amber-50 font-semibold text-[15px] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-900 transition-colors active:scale-[0.98]"
           >
             View Results & Choose Topics
           </button>
-        )}
+          {!allVoted && (
+            <button
+              onClick={() => advancePhase("topicResults")}
+              className="w-full h-11 rounded-xl bg-stone-200 text-stone-700 text-sm font-medium hover:bg-stone-300 transition-colors"
+            >
+              Skip to Results
+            </button>
+          )}
+        </div>
       </div>
     </MobileShell>
   );
