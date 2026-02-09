@@ -1,13 +1,23 @@
-import { supabase } from "@/lib/supabase";
+import { REALTIME_ENABLED, supabase } from "@/lib/supabase";
 import type { Guest, PickedQuestion, Question, Session, SessionPhase, Topic } from "@/types";
+import type { RealtimePayload } from "@/types/realtime";
 import { mergeGuests, mergePickedQuestions, mergeVotes } from "@/utils/polling";
 import { useCallback, useEffect, useState } from "react";
 import { usePolling } from "./usePolling";
+import { useSupabaseRealtime } from "./useSupabaseRealtime";
 
 interface UseSupabaseSessionOptions {
   sessionId: string | null;
   topics: Topic[];
   questions: Question[];
+}
+
+type ConnectionMode = "realtime" | "polling";
+
+interface ConnectionModeState {
+  mode: ConnectionMode;
+  realtimeHealth: "healthy" | "degraded" | "failed";
+  lastModeSwitch: Date | null;
 }
 
 export function useSupabaseSession({ sessionId, topics, questions }: UseSupabaseSessionOptions) {
@@ -17,6 +27,11 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
   const [connected, setConnected] = useState(false);
   const [lastPollTime, setLastPollTime] = useState<Date>(new Date());
   const [lastSessionUpdate, setLastSessionUpdate] = useState<Date>(new Date());
+  const [connectionMode, setConnectionMode] = useState<ConnectionModeState>({
+    mode: REALTIME_ENABLED ? "realtime" : "polling",
+    realtimeHealth: "healthy",
+    lastModeSwitch: null,
+  });
 
   const loadSessionData = useCallback(
     async (sid: string) => {
@@ -287,9 +302,150 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     setLastPollTime(new Date());
   }, [sessionId, loadSessionData]);
 
-  // Set up polling
+  // Realtime event handlers
+  const handleRealtimeGuestInsert = useCallback((payload: RealtimePayload) => {
+    // payload.new is already transformed by useSupabaseRealtime
+    const newGuest: Guest = {
+      id: payload.new.id,
+      sessionId: payload.new.sessionId,
+      nickname: payload.new.nickname,
+      hasVoted: payload.new.hasVoted || false,
+      hasPicked: payload.new.hasPicked || false,
+      pickedQuestionId: payload.new.pickedQuestionId || null,
+      joined_at: payload.new.joinedAt,
+    };
+
+    setSession((prev) => {
+      if (!prev) return prev;
+      // Deduplicate by ID
+      const exists = prev.guests.some((g) => g.id === newGuest.id);
+      if (exists) {
+        console.log("[Realtime] Guest already exists, skipping duplicate:", newGuest.id);
+        return prev;
+      }
+      console.log("[Realtime] Adding new guest:", newGuest.nickname);
+      return { ...prev, guests: [...prev.guests, newGuest] };
+    });
+  }, []);
+
+  const handleRealtimeVoteInsert = useCallback((payload: RealtimePayload) => {
+    const vote = {
+      guestId: payload.new.guestId,
+      topicId: payload.new.topicId,
+    };
+
+    setSession((prev) => {
+      if (!prev) return prev;
+
+      const updatedVotes = { ...prev.votes };
+      if (!updatedVotes[vote.guestId]) {
+        updatedVotes[vote.guestId] = [];
+      }
+
+      // Deduplicate
+      if (updatedVotes[vote.guestId].includes(vote.topicId)) {
+        console.log("[Realtime] Vote already exists, skipping duplicate");
+        return prev;
+      }
+
+      updatedVotes[vote.guestId] = [...updatedVotes[vote.guestId], vote.topicId];
+      console.log("[Realtime] Adding new vote for guest:", vote.guestId);
+      return { ...prev, votes: updatedVotes };
+    });
+  }, []);
+
+  const handleRealtimePickedQuestionInsert = useCallback(
+    (_payload: RealtimePayload) => {
+      // Need to fetch the full question details since Realtime only gives us IDs
+      // For now, we'll let polling handle this or implement a fetch here
+      console.log("[Realtime] Picked question event received, triggering refresh");
+      if (sessionId) {
+        handleFullReload();
+      }
+    },
+    [sessionId, handleFullReload],
+  );
+
+  const handleRealtimeSessionTopicInsert = useCallback(
+    (payload: RealtimePayload) => {
+      const topicId = payload.new.topicId;
+
+      setSession((prev) => {
+        if (!prev) return prev;
+
+        // Find topic in available topics
+        const topic = topics.find((t) => t.id === topicId);
+        if (!topic) {
+          console.log("[Realtime] Topic not found:", topicId);
+          return prev;
+        }
+
+        // Deduplicate
+        const exists = prev.confirmedTopics.some((t) => t.id === topicId);
+        if (exists) {
+          console.log("[Realtime] Topic already confirmed, skipping duplicate");
+          return prev;
+        }
+
+        console.log("[Realtime] Adding confirmed topic:", topic.name);
+        return { ...prev, confirmedTopics: [...prev.confirmedTopics, topic] };
+      });
+    },
+    [topics],
+  );
+
+  const handleRealtimeSessionUpdate = useCallback((payload: RealtimePayload) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+
+      console.log("[Realtime] Session updated, phase:", payload.new.phase);
+      return {
+        ...prev,
+        phase: payload.new.phase as SessionPhase,
+        currentRound: payload.new.currentRound,
+        updated_at: payload.new.updatedAt,
+      };
+    });
+    setLastSessionUpdate(new Date());
+  }, []);
+
+  const handleRealtimeQuestionPoolUpdate = useCallback(
+    (_payload: RealtimePayload) => {
+      console.log("[Realtime] Question pool updated");
+      // Pool updates are complex, let polling handle full refresh
+      if (sessionId) {
+        handleFullReload();
+      }
+    },
+    [sessionId, handleFullReload],
+  );
+
+  const handleConnectionStateChange = useCallback((mode: ConnectionMode) => {
+    console.log("[Connection] Mode changed to:", mode);
+    setConnectionMode((prev) => ({
+      ...prev,
+      mode,
+      realtimeHealth: mode === "realtime" ? "healthy" : "failed",
+      lastModeSwitch: new Date(),
+    }));
+  }, []);
+
+  // Initialize Realtime hook
+  const realtime = useSupabaseRealtime({
+    sessionId,
+    enabled: REALTIME_ENABLED && connectionMode.mode === "realtime",
+    onGuestInsert: handleRealtimeGuestInsert,
+    onVoteInsert: handleRealtimeVoteInsert,
+    onPickedQuestionInsert: handleRealtimePickedQuestionInsert,
+    onSessionTopicInsert: handleRealtimeSessionTopicInsert,
+    onSessionUpdate: handleRealtimeSessionUpdate,
+    onQuestionPoolUpdate: handleRealtimeQuestionPoolUpdate,
+    onConnectionStateChange: handleConnectionStateChange,
+  });
+
+  // Set up polling (only enabled when in polling mode)
   const polling = usePolling({
-    enabled: !!sessionId,
+    enabled: connectionMode.mode === "polling" && !!sessionId,
     sessionId,
     phase: session?.phase || "lobby",
     onIncrementalPoll: handleIncrementalPoll,
@@ -307,18 +463,38 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     loadSessionData(sessionId);
   }, [sessionId, loadSessionData]);
 
-  // Update connected state based on polling health
+  // Auto-recovery: attempt to switch back to Realtime after 30 seconds
   useEffect(() => {
-    setConnected(polling.connectionHealth === "healthy");
-  }, [polling.connectionHealth]);
+    if (REALTIME_ENABLED && connectionMode.mode === "polling" && connectionMode.lastModeSwitch) {
+      console.log("[Connection] Scheduling Realtime reconnection attempt in 30s");
+      const timer = setTimeout(() => {
+        console.log("[Connection] Attempting Realtime reconnection");
+        setConnectionMode((prev) => ({
+          ...prev,
+          mode: "realtime",
+          realtimeHealth: "healthy",
+        }));
+      }, 30000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [connectionMode.mode, connectionMode.lastModeSwitch]);
+
+  // Update connected state based on current mode
+  useEffect(() => {
+    const isHealthy =
+      connectionMode.mode === "realtime" ? realtime.isConnected : polling.connectionHealth === "healthy";
+    setConnected(isHealthy);
+  }, [connectionMode.mode, realtime.isConnected, polling.connectionHealth]);
 
   return {
     session,
     loading,
     error,
     connected,
-    connectionHealth: polling.connectionHealth,
-    lastUpdate: polling.lastUpdate,
+    connectionHealth: connectionMode.mode === "realtime" ? realtime.connectionHealth : polling.connectionHealth,
+    connectionMode: connectionMode.mode,
+    lastUpdate: connectionMode.mode === "realtime" ? realtime.lastUpdate : polling.lastUpdate,
     refetch: polling.manualRefresh,
   };
 }

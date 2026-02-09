@@ -25,6 +25,7 @@ interface AppContextType extends AppState {
   loading: boolean;
   connected: boolean;
   connectionHealth?: ConnectionHealth;
+  connectionMode?: "realtime" | "polling";
   lastUpdate?: Date | null;
 
   setView: (v: AppView) => void;
@@ -419,6 +420,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loading: auth.loading || topicsHook.loading || sessionHook.loading,
         connected: sessionHook.connected,
         connectionHealth: sessionHook.connectionHealth,
+        connectionMode: sessionHook.connectionMode,
         lastUpdate: sessionHook.lastUpdate,
         setView,
         login,

@@ -21,3 +21,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     },
   },
 });
+
+// Feature flag for Realtime (defaults to true)
+export const REALTIME_ENABLED = import.meta.env.VITE_REALTIME_ENABLED !== "false";
