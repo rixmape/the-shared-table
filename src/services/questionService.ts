@@ -1,31 +1,41 @@
 import { supabase } from "@/lib/supabase";
 
 /**
- * Confirm topics and populate question pool
+ * Confirm topics and populate question pool atomically
+ * Uses database RPC function to prevent partial failures
  * @param sessionId - The session ID
  * @param topicIds - Array of confirmed topic IDs
  */
 export async function confirmTopics(sessionId: string, topicIds: string[]) {
   try {
-    // Insert confirmed topics
-    const sessionTopics = topicIds.map((topicId) => ({
-      session_id: sessionId,
-      topic_id: topicId,
-    }));
-
-    const { error: topicsError } = await supabase.from("session_topics").insert(sessionTopics);
-
-    if (topicsError) throw topicsError;
-
-    // Populate question pool using database function
-    const { error: poolError } = await supabase.rpc("populate_question_pool", {
-      session_uuid: sessionId,
-      topic_uuids: topicIds,
+    const { data, error } = await supabase.rpc("confirm_topics_atomic", {
+      p_session_id: sessionId,
+      p_topic_ids: topicIds,
     });
 
-    if (poolError) throw poolError;
+    if (error) throw error;
 
-    return { success: true };
+    const result = data as {
+      success: boolean;
+      topic_count?: number;
+      question_count?: number;
+      error?: string;
+      error_code?: string;
+    };
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to confirm topics",
+        errorCode: result.error_code,
+      };
+    }
+
+    return {
+      success: true,
+      topicCount: result.topic_count,
+      questionCount: result.question_count,
+    };
   } catch (err) {
     console.error("Error confirming topics:", err);
     return {
@@ -36,136 +46,43 @@ export async function confirmTopics(sessionId: string, topicIds: string[]) {
 }
 
 /**
- * Get the next unpicked question from the pool
- * @param sessionId - The session ID
- */
-export async function getNextQuestion(sessionId: string) {
-  try {
-    const { data, error } = await supabase
-      .from("question_pool")
-      .select(
-        `
-        id,
-        question_id,
-        position,
-        questions(id, text, topic_id, topics(name))
-      `,
-      )
-      .eq("session_id", sessionId)
-      .eq("picked", false)
-      .order("position")
-      .limit(1)
-      .single();
-
-    if (error) {
-      if (error.code === "PGRST116") {
-        return { success: true, question: null }; // No questions left
-      }
-      throw error;
-    }
-
-    return {
-      success: true,
-      question: data,
-    };
-  } catch (err) {
-    console.error("Error getting next question:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to get next question",
-    };
-  }
-}
-
-/**
- * Pick a question for a guest
+ * Pick a question for a guest atomically
+ * Uses database RPC function to prevent race conditions
  * @param sessionId - The session ID
  * @param guestId - The guest ID
  * @param round - The current round number
  */
 export async function pickQuestion(sessionId: string, guestId: string, round: number) {
   try {
-    // Get next available question
-    const nextResult = await getNextQuestion(sessionId);
-    if (!nextResult.success || !nextResult.question) {
+    const { data, error } = await supabase.rpc("pick_question_atomic", {
+      p_session_id: sessionId,
+      p_guest_id: guestId,
+      p_round: round,
+    });
+
+    if (error) throw error;
+
+    const result = data as {
+      success: boolean;
+      question?: any;
+      error?: string;
+      error_code?: string;
+    };
+
+    if (!result.success) {
       return {
         success: false,
-        error: "No questions available",
+        error: result.error || "Failed to pick question",
+        errorCode: result.error_code,
       };
     }
 
-    const questionData = nextResult.question as any;
-    const questionId = questionData.questions.id;
-
-    // Mark question as picked in pool
-    const { error: poolError } = await supabase
-      .from("question_pool")
-      .update({ picked: true })
-      .eq("id", questionData.id);
-
-    if (poolError) throw poolError;
-
-    // Insert picked question record
-    const { error: pickError } = await supabase.from("picked_questions").insert({
-      session_id: sessionId,
-      guest_id: guestId,
-      question_id: questionId,
-      round,
-    });
-
-    if (pickError) throw pickError;
-
-    // Update guest status
-    const { error: guestError } = await supabase
-      .from("guests")
-      .update({
-        has_picked: true,
-        picked_question_id: questionId,
-      })
-      .eq("id", guestId);
-
-    if (guestError) throw guestError;
-
-    return {
-      success: true,
-      question: {
-        id: questionData.questions.id,
-        text: questionData.questions.text,
-        topicId: questionData.questions.topic_id,
-        topicName: questionData.questions.topics.name,
-      },
-    };
+    return { success: true, question: result.question };
   } catch (err) {
     console.error("Error picking question:", err);
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to pick question",
-    };
-  }
-}
-
-/**
- * Reset guest pick status for next round
- * @param sessionId - The session ID
- */
-export async function resetPicksForNextRound(sessionId: string) {
-  try {
-    const { error } = await supabase
-      .from("guests")
-      .update({
-        has_picked: false,
-        picked_question_id: null,
-      })
-      .eq("session_id", sessionId);
-
-    if (error) throw error;
-
-    return { success: true };
-  } catch (err) {
-    console.error("Error resetting picks:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to reset picks",
     };
   }
 }

@@ -70,73 +70,39 @@ export async function advancePhase(sessionId: string, phase: SessionPhase) {
 }
 
 /**
- * End a session and archive it to session_records
- * @param sessionId - The session ID
+ * End a session and archive its data atomically
+ * Uses database RPC function to prevent partial failures
+ * @param sessionId - The session ID to end
  */
 export async function endSession(sessionId: string) {
   try {
-    // Fetch complete session data
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("id", sessionId)
-      .single();
-
-    if (sessionError) throw sessionError;
-
-    // Fetch guests
-    const { data: guests, error: guestsError } = await supabase.from("guests").select("*").eq("session_id", sessionId);
-
-    if (guestsError) throw guestsError;
-
-    // Fetch confirmed topics
-    const { data: sessionTopics, error: topicsError } = await supabase
-      .from("session_topics")
-      .select("topic_id, topics(name)")
-      .eq("session_id", sessionId);
-
-    if (topicsError) throw topicsError;
-
-    // Fetch picked questions
-    const { data: pickedQuestions, error: questionsError } = await supabase
-      .from("picked_questions")
-      .select(
-        `
-        round,
-        guests(nickname),
-        questions(id, text, topics(name))
-      `,
-      )
-      .eq("session_id", sessionId);
-
-    if (questionsError) throw questionsError;
-
-    // Update session to ended
-    const { error: updateError } = await supabase
-      .from("sessions")
-      .update({
-        phase: "ended",
-        end_time: new Date().toISOString(),
-      })
-      .eq("id", sessionId);
-
-    if (updateError) throw updateError;
-
-    // Archive to session_records
-    const { error: archiveError } = await supabase.from("session_records").insert({
-      id: sessionId,
-      code: session.code,
-      start_time: session.start_time,
-      end_time: new Date().toISOString(),
-      guest_count: guests?.length || 0,
-      guests_json: guests || [],
-      confirmed_topics_json: sessionTopics || [],
-      picked_questions_json: pickedQuestions || [],
+    const { data, error } = await supabase.rpc("end_session_atomic", {
+      p_session_id: sessionId,
     });
 
-    if (archiveError) throw archiveError;
+    if (error) throw error;
 
-    return { success: true };
+    const result = data as {
+      success: boolean;
+      session_id?: string;
+      guest_count?: number;
+      error?: string;
+      error_code?: string;
+    };
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to end session",
+        errorCode: result.error_code,
+      };
+    }
+
+    return {
+      success: true,
+      sessionId: result.session_id,
+      guestCount: result.guest_count,
+    };
   } catch (err) {
     console.error("Error ending session:", err);
     return {

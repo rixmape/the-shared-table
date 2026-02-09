@@ -384,17 +384,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const nextRound = useCallback(async () => {
-    if (!state.currentSessionId || !sessionHook.session) return;
+    if (!state.currentSessionId) return;
 
-    // Reset picks
-    await questionService.resetPicksForNextRound(state.currentSessionId);
+    try {
+      const { data, error } = await supabase.rpc("advance_round_atomic", {
+        p_session_id: state.currentSessionId,
+      });
 
-    // Update round number
-    await supabase
-      .from("sessions")
-      .update({ current_round: sessionHook.session.currentRound + 1 })
-      .eq("id", state.currentSessionId);
-  }, [state.currentSessionId, sessionHook.session]);
+      if (error) {
+        console.error("Error advancing round:", error);
+        // TODO: Show error to user
+        return;
+      }
+
+      const result = data as {
+        success: boolean;
+        new_round?: number;
+        error?: string;
+      };
+
+      if (!result.success) {
+        console.error("Failed to advance round:", result.error);
+        // TODO: Show error to user
+      }
+    } catch (err) {
+      console.error("Exception advancing round:", err);
+      // TODO: Show error to user
+    }
+  }, [state.currentSessionId]);
 
   const endSession = useCallback(async () => {
     if (!state.currentSessionId) return;

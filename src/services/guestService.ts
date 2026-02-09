@@ -49,30 +49,38 @@ export async function joinSession(sessionId: string, nickname: string) {
 }
 
 /**
- * Submit votes for a guest
+ * Submit votes for a guest atomically
+ * Uses database RPC function to prevent duplicate voting
  * @param sessionId - The session ID
  * @param guestId - The guest ID
  * @param topicIds - Array of topic IDs voted for
  */
 export async function submitVote(sessionId: string, guestId: string, topicIds: string[]) {
   try {
-    // Insert votes for each topic
-    const votes = topicIds.map((topicId) => ({
-      session_id: sessionId,
-      guest_id: guestId,
-      topic_id: topicId,
-    }));
+    const { data, error } = await supabase.rpc("submit_vote_atomic", {
+      p_session_id: sessionId,
+      p_guest_id: guestId,
+      p_topic_ids: topicIds,
+    });
 
-    const { error: votesError } = await supabase.from("votes").insert(votes);
+    if (error) throw error;
 
-    if (votesError) throw votesError;
+    const result = data as {
+      success: boolean;
+      votes_count?: number;
+      error?: string;
+      error_code?: string;
+    };
 
-    // Update guest has_voted status
-    const { error: updateError } = await supabase.from("guests").update({ has_voted: true }).eq("id", guestId);
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to submit vote",
+        errorCode: result.error_code,
+      };
+    }
 
-    if (updateError) throw updateError;
-
-    return { success: true };
+    return { success: true, votesCount: result.votes_count };
   } catch (err) {
     console.error("Error submitting vote:", err);
     return {
