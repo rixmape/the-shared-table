@@ -29,7 +29,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const errorCountRef = useRef(0);
-  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastErrorTimestampRef = useRef<number>(0);
+  const ERROR_DEBOUNCE_MS = 100; // Ignore duplicate errors within 100ms
 
   // Transform database column names to camelCase
   const transformGuest = useCallback(
@@ -114,8 +115,19 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
         console.log("[Realtime] Successfully connected, resetting error count");
         errorCountRef.current = 0;
         setErrorCount(0);
+        lastErrorTimestampRef.current = 0; // Reset error timestamp
         onConnectionStateChange?.("realtime");
       } else if (state === "ERROR" || state === "CLOSED") {
+        // Defensive deduplication: Check if error occurred very recently
+        const now = Date.now();
+        const timeSinceLastError = now - lastErrorTimestampRef.current;
+
+        if (timeSinceLastError < ERROR_DEBOUNCE_MS) {
+          console.log(`[Realtime] Ignoring duplicate error (${timeSinceLastError}ms since last)`);
+          return; // Skip duplicate error
+        }
+
+        lastErrorTimestampRef.current = now;
         errorCountRef.current += 1;
         setErrorCount(errorCountRef.current);
         console.log("[Realtime] Error/closed state, error count:", errorCountRef.current);
@@ -296,24 +308,9 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       },
     );
 
-    // Handle channel status changes
-    channel.on("system", {}, (payload: any) => {
-      console.log("[Realtime] System event:", payload);
-
-      if (payload.status === "SUBSCRIBED") {
-        handleConnectionState("CONNECTED");
-      } else if (payload.status === "CHANNEL_ERROR") {
-        handleConnectionState("ERROR");
-      } else if (payload.status === "TIMED_OUT") {
-        handleConnectionState("ERROR");
-      } else if (payload.status === "CLOSED") {
-        handleConnectionState("CLOSED");
-      }
-    });
-
     // Subscribe to the channel
     channel.subscribe((status, err) => {
-      console.log("[Realtime] Subscribe callback:", status, err);
+      console.log("[Realtime] Subscribe callback:", status, err ? err.message : "no error");
 
       if (status === "SUBSCRIBED") {
         handleConnectionState("CONNECTED");
@@ -332,10 +329,6 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
-      }
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
       }
     };
   }, [

@@ -11,48 +11,11 @@ This application implements a **real-time collaborative session system** using a
 - **Fallback Mode:** HTTP polling with 1-second intervals
 - **Auto-Recovery:** Attempts to reconnect to realtime every 30 seconds
 
-The audit identified **17 critical and major issues** affecting data integrity, synchronization reliability, and application stability.
-
-## Critical Issues (Immediate Action Required)
-
-### 1. Duplicate Error Handling in Realtime Subscriptions
-
-**Severity:** 🔴 CRITICAL
-**Impact:** Premature fallback to polling mode
-
-**Problem:** Both `system` event listener and `subscribe` callback handle identical error states, potentially double-counting errors.
-
-**Location:** `useSupabaseRealtime.ts`
-
-```typescript
-// System events
-channel.on("system", {}, (payload) => {
-  if (payload.status === "CHANNEL_ERROR") handleConnectionState("ERROR");
-  if (payload.status === "TIMED_OUT") handleConnectionState("ERROR");
-});
-
-// Subscribe callback
-channel.subscribe((status, err) => {
-  if (status === "CHANNEL_ERROR") handleConnectionState("ERROR");
-  if (status === "TIMED_OUT") handleConnectionState("ERROR");
-});
-```
-
-**Impact:**
-
-- Error counter may increment twice for a single error
-- Triggers fallback to polling after 1-2 real errors instead of 3
-- Unnecessary degradation of real-time experience
-
-**Recommendation:**
-
-- Choose either system events OR subscribe callback, not both
-- Add error deduplication logic
-- Log error sources for debugging
+The audit identified **16 critical and major issues** affecting data integrity, synchronization reliability, and application stability.
 
 ## Major Issues (High Priority)
 
-### 2. Realtime Effect Re-subscription Storm
+### 1. Realtime Effect Re-subscription Storm
 
 **Severity:** 🟠 MAJOR
 **Impact:** Unnecessary network overhead and missed events
@@ -89,7 +52,7 @@ channel.subscribe((status, err) => {
 - Use refs for callbacks instead of including in dependencies
 - Or ensure parent components wrap callbacks in `useCallback` with stable dependencies
 
-### 3. Incomplete Realtime Handlers Trigger Full Reloads
+### 2. Incomplete Realtime Handlers Trigger Full Reloads
 
 **Severity:** 🟠 MAJOR
 **Impact:** Defeats purpose of realtime updates
@@ -127,7 +90,7 @@ const handleRealtimePickedQuestionInsert = useCallback(
 - Merge incrementally instead of full reload
 - Cache question data to avoid repeated fetches
 
-### 4. Polling State Dependencies Cause Restart Loops
+### 3. Polling State Dependencies Cause Restart Loops
 
 **Severity:** 🟠 MAJOR
 **Impact:** Unstable polling during error conditions
@@ -161,7 +124,7 @@ const handleRealtimePickedQuestionInsert = useCallback(
 - Remove `state.consecutiveErrors` and `state.lastFullFetch` from dependencies
 - Use functional state updates to access current state
 
-### 5. Guest View Sync Updates Own Dependency
+### 4. Guest View Sync Updates Own Dependency
 
 **Severity:** 🟠 MAJOR
 **Impact:** Potential infinite loop, fragile pattern
@@ -190,7 +153,7 @@ useEffect(() => {
 - Use a reducer for view state instead
 - Or remove `state.view` from dependencies and rely only on phase changes
 
-### 6. Mode Transition Data Duplication
+### 5. Mode Transition Data Duplication
 
 **Severity:** 🟠 MAJOR
 **Impact:** Duplicate events during realtime ↔ polling switches
@@ -213,7 +176,7 @@ useEffect(() => {
 - Verify state consistency after mode switches
 - Implement reconciliation logic
 
-### 7. Phase Advancement Without Rollback
+### 6. Phase Advancement Without Rollback
 
 **Severity:** 🟠 MAJOR
 **Impact:** Host and guests could end up in different phases
@@ -249,38 +212,7 @@ const advancePhase = useCallback(
 
 ## Medium Priority Issues
 
-### 8. Dead Code: Unused `reconnectTimerRef`
-
-**Severity:** 🟡 MEDIUM
-**Impact:** Code maintenance confusion
-
-**Problem:** `reconnectTimerRef` is declared and cleaned up but never set.
-
-**Location:** `useSupabaseRealtime.ts:31, 314-316`
-
-```typescript
-const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);  // Line 31
-
-// Cleanup (lines 314-316)
-if (reconnectTimerRef.current) {
-  clearTimeout(reconnectTimerRef.current);
-  reconnectTimerRef.current = null;
-}
-// But it's NEVER assigned anywhere!
-```
-
-**Impact:**
-
-- Dead code adds confusion
-- Cleanup code executes unnecessarily
-- May indicate incomplete auto-reconnection feature
-
-**Recommendation:**
-
-- Remove it entirely, or
-- Implement the intended reconnection logic
-
-### 9. Missing Cleanup for Async Operations
+### 7. Missing Cleanup for Async Operations
 
 **Severity:** 🟡 MEDIUM
 **Impact:** "Can't update unmounted component" warnings
@@ -323,7 +255,7 @@ setTimeout(async () => {
 - Use `isMountedRef` pattern or AbortController
 - Clear timeouts in cleanup functions
 
-### 10. Auto-Recovery Sets Health Without Verification
+### 8. Auto-Recovery Sets Health Without Verification
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Potential fallback → recovery → fallback loop
@@ -352,7 +284,7 @@ setTimeout(() => {
 - Don't set health to "healthy" until first successful connection
 - Add connection verification step before switching modes
 
-### 11. Session Data Load Race Condition
+### 9. Session Data Load Race Condition
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Duplicate simultaneous session loads
@@ -384,7 +316,7 @@ useEffect(() => {
 - Use ref to track in-flight requests
 - Cancel previous load if new one starts
 
-### 12. Vote Submission Has No Optimistic Update
+### 10. Vote Submission Has No Optimistic Update
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Poor UX during network latency
@@ -413,7 +345,7 @@ const handleSubmit = () => {
 - Rollback if submission fails
 - Show loading state during submission
 
-### 13. Inconsistent Timestamp Tracking
+### 11. Inconsistent Timestamp Tracking
 
 **Severity:** 🟡 MEDIUM
 **Impact:** No unified "freshness" metric
@@ -436,7 +368,7 @@ const handleSubmit = () => {
 - Use consistent naming across all hooks
 - Expose single source of truth for "last sync time"
 
-### 14. Local Question State Not Synced with Global State
+### 12. Local Question State Not Synced with Global State
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Lost state on component remount
@@ -464,7 +396,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 
 ## Low Priority Issues
 
-### 15. Production Console Logging
+### 13. Production Console Logging
 
 **Severity:** 🟢 LOW
 **Impact:** Performance overhead, cluttered console
@@ -484,7 +416,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 - Use proper logging library with levels
 - Strip in production builds
 
-### 16. Inconsistent Error Threshold Between Modes
+### 14. Inconsistent Error Threshold Between Modes
 
 **Severity:** 🟢 LOW
 **Impact:** Different recovery characteristics
@@ -501,7 +433,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 - Unify error thresholds
 - Document rationale if they should differ
 
-### 17. No Explicit WebSocket Timeout Configuration
+### 15. No Explicit WebSocket Timeout Configuration
 
 **Severity:** 🟢 LOW
 **Impact:** Relies on Supabase defaults
@@ -532,7 +464,7 @@ realtime: {
 
 ## Security & Database Issues
 
-### 18. Permissive RLS Policies
+### 16. Permissive RLS Policies
 
 **Severity:** 🟠 MAJOR (Security)
 **Impact:** Potential for abuse
@@ -570,17 +502,13 @@ CREATE POLICY "Anyone can insert sessions" ON sessions
 | Category | Critical | Major | Medium | Low | Total |
 |----------|----------|-------|--------|-----|-------|
 | Data Integrity | 1 | 4 | 2 | 0 | 7 |
-| Synchronization | 1 | 3 | 3 | 2 | 9 |
+| Synchronization | 0 | 3 | 3 | 2 | 8 |
 | React Lifecycle | 0 | 1 | 5 | 0 | 6 |
 | Security | 0 | 1 | 0 | 0 | 1 |
-| Code Quality | 0 | 0 | 2 | 1 | 3 |
-| **TOTAL** | **2** | **9** | **12** | **3** | **26** |
+| Code Quality | 0 | 0 | 1 | 1 | 2 |
+| **TOTAL** | **1** | **9** | **11** | **3** | **24** |
 
 ## Recommendations Priority Matrix
-
-### Immediate (This Week)
-
-1. ⬜ Fix duplicate error handling in realtime hook
 
 ### High Priority (This Month)
 
@@ -592,13 +520,12 @@ CREATE POLICY "Anyone can insert sessions" ON sessions
 
 ### Medium Priority (Next Quarter)
 
-1. ⬜ Clean up dead code (reconnectTimerRef)
-2. ⬜ Add cleanup for async operations
-3. ⬜ Improve auto-recovery health verification
-4. ⬜ Add loading guards for session data
-5. ⬜ Implement optimistic updates for votes
-6. ⬜ Unify timestamp tracking
-7. ⬜ Sync local question state with global state
+1. ⬜ Add cleanup for async operations
+2. ⬜ Improve auto-recovery health verification
+3. ⬜ Add loading guards for session data
+4. ⬜ Implement optimistic updates for votes
+5. ⬜ Unify timestamp tracking
+6. ⬜ Sync local question state with global state
 
 ### Low Priority (Backlog)
 
