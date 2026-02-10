@@ -32,6 +32,75 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
   const lastErrorTimestampRef = useRef<number>(0);
   const ERROR_DEBOUNCE_MS = 100; // Ignore duplicate errors within 100ms
 
+  // Refs to store latest callback versions (prevents effect re-runs)
+  const onGuestInsertRef = useRef(onGuestInsert);
+  const onGuestUpdateRef = useRef(onGuestUpdate);
+  const onVoteInsertRef = useRef(onVoteInsert);
+  const onPickedQuestionInsertRef = useRef(onPickedQuestionInsert);
+  const onSessionTopicInsertRef = useRef(onSessionTopicInsert);
+  const onSessionUpdateRef = useRef(onSessionUpdate);
+  const onQuestionPoolUpdateRef = useRef(onQuestionPoolUpdate);
+  const onConnectionStateChangeRef = useRef(onConnectionStateChange);
+
+  // Sync refs with latest callbacks on every render
+  useEffect(() => {
+    onGuestInsertRef.current = onGuestInsert;
+  }, [onGuestInsert]);
+  useEffect(() => {
+    onGuestUpdateRef.current = onGuestUpdate;
+  }, [onGuestUpdate]);
+  useEffect(() => {
+    onVoteInsertRef.current = onVoteInsert;
+  }, [onVoteInsert]);
+  useEffect(() => {
+    onPickedQuestionInsertRef.current = onPickedQuestionInsert;
+  }, [onPickedQuestionInsert]);
+  useEffect(() => {
+    onSessionTopicInsertRef.current = onSessionTopicInsert;
+  }, [onSessionTopicInsert]);
+  useEffect(() => {
+    onSessionUpdateRef.current = onSessionUpdate;
+  }, [onSessionUpdate]);
+  useEffect(() => {
+    onQuestionPoolUpdateRef.current = onQuestionPoolUpdate;
+  }, [onQuestionPoolUpdate]);
+  useEffect(() => {
+    onConnectionStateChangeRef.current = onConnectionStateChange;
+  }, [onConnectionStateChange]);
+
+  // Create stable wrappers that call latest callback from ref
+  const stableOnGuestInsert = useCallback((payload: RealtimePayload) => {
+    onGuestInsertRef.current?.(payload);
+  }, []);
+
+  const stableOnGuestUpdate = useCallback((payload: RealtimePayload) => {
+    onGuestUpdateRef.current?.(payload);
+  }, []);
+
+  const stableOnVoteInsert = useCallback((payload: RealtimePayload) => {
+    onVoteInsertRef.current?.(payload);
+  }, []);
+
+  const stableOnPickedQuestionInsert = useCallback((payload: RealtimePayload) => {
+    onPickedQuestionInsertRef.current?.(payload);
+  }, []);
+
+  const stableOnSessionTopicInsert = useCallback((payload: RealtimePayload) => {
+    onSessionTopicInsertRef.current?.(payload);
+  }, []);
+
+  const stableOnSessionUpdate = useCallback((payload: RealtimePayload) => {
+    onSessionUpdateRef.current?.(payload);
+  }, []);
+
+  const stableOnQuestionPoolUpdate = useCallback((payload: RealtimePayload) => {
+    onQuestionPoolUpdateRef.current?.(payload);
+  }, []);
+
+  const stableOnConnectionStateChange = useCallback((mode: "realtime" | "polling") => {
+    onConnectionStateChangeRef.current?.(mode);
+  }, []);
+
   // Transform database column names to camelCase
   const transformGuest = useCallback(
     (row: any) => ({
@@ -115,16 +184,15 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
         console.log("[Realtime] Successfully connected, resetting error count");
         errorCountRef.current = 0;
         setErrorCount(0);
-        lastErrorTimestampRef.current = 0; // Reset error timestamp
-        onConnectionStateChange?.("realtime");
+        lastErrorTimestampRef.current = 0;
+        stableOnConnectionStateChange("realtime");
       } else if (state === "ERROR" || state === "CLOSED") {
-        // Defensive deduplication: Check if error occurred very recently
         const now = Date.now();
         const timeSinceLastError = now - lastErrorTimestampRef.current;
 
         if (timeSinceLastError < ERROR_DEBOUNCE_MS) {
           console.log(`[Realtime] Ignoring duplicate error (${timeSinceLastError}ms since last)`);
-          return; // Skip duplicate error
+          return;
         }
 
         lastErrorTimestampRef.current = now;
@@ -134,11 +202,11 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
 
         if (errorCountRef.current >= MAX_ERRORS_BEFORE_FALLBACK) {
           console.log("[Realtime] Max errors reached, switching to polling");
-          onConnectionStateChange?.("polling");
+          stableOnConnectionStateChange("polling");
         }
       }
     },
-    [onConnectionStateChange],
+    [stableOnConnectionStateChange],
   );
 
   // Create and manage Realtime subscription
@@ -173,8 +241,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Guest inserted:", payload);
         setLastUpdate(new Date());
-        if (onGuestInsert) {
-          onGuestInsert({
+        if (stableOnGuestInsert) {
+          stableOnGuestInsert({
             ...payload,
             new: transformGuest(payload.new),
           });
@@ -194,8 +262,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Guest updated:", payload);
         setLastUpdate(new Date());
-        if (onGuestUpdate) {
-          onGuestUpdate({
+        if (stableOnGuestUpdate) {
+          stableOnGuestUpdate({
             ...payload,
             new: transformGuest(payload.new),
           });
@@ -215,8 +283,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Vote inserted:", payload);
         setLastUpdate(new Date());
-        if (onVoteInsert) {
-          onVoteInsert({
+        if (stableOnVoteInsert) {
+          stableOnVoteInsert({
             ...payload,
             new: transformVote(payload.new),
           });
@@ -236,8 +304,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Picked question inserted:", payload);
         setLastUpdate(new Date());
-        if (onPickedQuestionInsert) {
-          onPickedQuestionInsert({
+        if (stableOnPickedQuestionInsert) {
+          stableOnPickedQuestionInsert({
             ...payload,
             new: transformPickedQuestion(payload.new),
           });
@@ -257,8 +325,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Session topic inserted:", payload);
         setLastUpdate(new Date());
-        if (onSessionTopicInsert) {
-          onSessionTopicInsert({
+        if (stableOnSessionTopicInsert) {
+          stableOnSessionTopicInsert({
             ...payload,
             new: transformSessionTopic(payload.new),
           });
@@ -278,8 +346,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Session updated:", payload);
         setLastUpdate(new Date());
-        if (onSessionUpdate) {
-          onSessionUpdate({
+        if (stableOnSessionUpdate) {
+          stableOnSessionUpdate({
             ...payload,
             new: transformSession(payload.new),
           });
@@ -299,8 +367,8 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
       (payload: RealtimePayload) => {
         console.log("[Realtime] Question pool updated:", payload);
         setLastUpdate(new Date());
-        if (onQuestionPoolUpdate) {
-          onQuestionPoolUpdate({
+        if (stableOnQuestionPoolUpdate) {
+          stableOnQuestionPoolUpdate({
             ...payload,
             new: transformQuestionPoolItem(payload.new),
           });
@@ -334,13 +402,13 @@ export function useSupabaseRealtime(config: RealtimeHookConfig): RealtimeHookRet
   }, [
     enabled,
     sessionId,
-    onGuestInsert,
-    onGuestUpdate,
-    onVoteInsert,
-    onPickedQuestionInsert,
-    onSessionTopicInsert,
-    onSessionUpdate,
-    onQuestionPoolUpdate,
+    stableOnGuestInsert,
+    stableOnGuestUpdate,
+    stableOnVoteInsert,
+    stableOnPickedQuestionInsert,
+    stableOnSessionTopicInsert,
+    stableOnSessionUpdate,
+    stableOnQuestionPoolUpdate,
     handleConnectionState,
     transformGuest,
     transformVote,

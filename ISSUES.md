@@ -11,48 +11,11 @@ This application implements a **real-time collaborative session system** using a
 - **Fallback Mode:** HTTP polling with 1-second intervals
 - **Auto-Recovery:** Attempts to reconnect to realtime every 30 seconds
 
-The audit identified **16 critical and major issues** affecting data integrity, synchronization reliability, and application stability.
+The audit identified **15 critical and major issues** affecting data integrity, synchronization reliability, and application stability.
 
 ## Major Issues (High Priority)
 
-### 1. Realtime Effect Re-subscription Storm
-
-**Severity:** 🟠 MAJOR
-**Impact:** Unnecessary network overhead and missed events
-
-**Problem:** Large dependency array causes channel teardown/recreation on any callback change.
-
-**Location:** `useSupabaseRealtime.ts:319-335`
-
-```typescript
-}, [
-  enabled,
-  sessionId,
-  onGuestInsert,        // ⚠️ Unstable references
-  onVoteInsert,
-  onPickedQuestionInsert,
-  onSessionTopicInsert,
-  onSessionUpdate,
-  onQuestionPoolUpdate,
-  handleConnectionState,
-  transformGuest,       // Stable (useCallback with [])
-  transformVote,
-  // ... etc
-]);
-```
-
-**Impact:**
-
-- If parent passes unstable callback references, entire realtime subscription tears down and recreates
-- Each recreation = unsubscribe from 6 table listeners + resubscribe
-- Network overhead and potential missed events during reconnection
-
-**Recommendation:**
-
-- Use refs for callbacks instead of including in dependencies
-- Or ensure parent components wrap callbacks in `useCallback` with stable dependencies
-
-### 2. Incomplete Realtime Handlers Trigger Full Reloads
+### 1. Incomplete Realtime Handlers Trigger Full Reloads
 
 **Severity:** 🟠 MAJOR
 **Impact:** Defeats purpose of realtime updates
@@ -90,7 +53,7 @@ const handleRealtimePickedQuestionInsert = useCallback(
 - Merge incrementally instead of full reload
 - Cache question data to avoid repeated fetches
 
-### 3. Polling State Dependencies Cause Restart Loops
+### 2. Polling State Dependencies Cause Restart Loops
 
 **Severity:** 🟠 MAJOR
 **Impact:** Unstable polling during error conditions
@@ -124,7 +87,7 @@ const handleRealtimePickedQuestionInsert = useCallback(
 - Remove `state.consecutiveErrors` and `state.lastFullFetch` from dependencies
 - Use functional state updates to access current state
 
-### 4. Guest View Sync Updates Own Dependency
+### 3. Guest View Sync Updates Own Dependency
 
 **Severity:** 🟠 MAJOR
 **Impact:** Potential infinite loop, fragile pattern
@@ -153,7 +116,7 @@ useEffect(() => {
 - Use a reducer for view state instead
 - Or remove `state.view` from dependencies and rely only on phase changes
 
-### 5. Mode Transition Data Duplication
+### 4. Mode Transition Data Duplication
 
 **Severity:** 🟠 MAJOR
 **Impact:** Duplicate events during realtime ↔ polling switches
@@ -176,7 +139,7 @@ useEffect(() => {
 - Verify state consistency after mode switches
 - Implement reconciliation logic
 
-### 6. Phase Advancement Without Rollback
+### 5. Phase Advancement Without Rollback
 
 **Severity:** 🟠 MAJOR
 **Impact:** Host and guests could end up in different phases
@@ -212,7 +175,7 @@ const advancePhase = useCallback(
 
 ## Medium Priority Issues
 
-### 7. Missing Cleanup for Async Operations
+### 6. Missing Cleanup for Async Operations
 
 **Severity:** 🟡 MEDIUM
 **Impact:** "Can't update unmounted component" warnings
@@ -255,7 +218,7 @@ setTimeout(async () => {
 - Use `isMountedRef` pattern or AbortController
 - Clear timeouts in cleanup functions
 
-### 8. Auto-Recovery Sets Health Without Verification
+### 7. Auto-Recovery Sets Health Without Verification
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Potential fallback → recovery → fallback loop
@@ -284,7 +247,7 @@ setTimeout(() => {
 - Don't set health to "healthy" until first successful connection
 - Add connection verification step before switching modes
 
-### 9. Session Data Load Race Condition
+### 8. Session Data Load Race Condition
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Duplicate simultaneous session loads
@@ -316,7 +279,7 @@ useEffect(() => {
 - Use ref to track in-flight requests
 - Cancel previous load if new one starts
 
-### 10. Vote Submission Has No Optimistic Update
+### 9. Vote Submission Has No Optimistic Update
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Poor UX during network latency
@@ -345,7 +308,7 @@ const handleSubmit = () => {
 - Rollback if submission fails
 - Show loading state during submission
 
-### 11. Inconsistent Timestamp Tracking
+### 10. Inconsistent Timestamp Tracking
 
 **Severity:** 🟡 MEDIUM
 **Impact:** No unified "freshness" metric
@@ -368,7 +331,7 @@ const handleSubmit = () => {
 - Use consistent naming across all hooks
 - Expose single source of truth for "last sync time"
 
-### 12. Local Question State Not Synced with Global State
+### 11. Local Question State Not Synced with Global State
 
 **Severity:** 🟡 MEDIUM
 **Impact:** Lost state on component remount
@@ -396,7 +359,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 
 ## Low Priority Issues
 
-### 13. Production Console Logging
+### 12. Production Console Logging
 
 **Severity:** 🟢 LOW
 **Impact:** Performance overhead, cluttered console
@@ -416,7 +379,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 - Use proper logging library with levels
 - Strip in production builds
 
-### 14. Inconsistent Error Threshold Between Modes
+### 13. Inconsistent Error Threshold Between Modes
 
 **Severity:** 🟢 LOW
 **Impact:** Different recovery characteristics
@@ -433,7 +396,7 @@ const [myQuestionRound, setMyQuestionRound] = useState<number | null>(null);
 - Unify error thresholds
 - Document rationale if they should differ
 
-### 15. No Explicit WebSocket Timeout Configuration
+### 14. No Explicit WebSocket Timeout Configuration
 
 **Severity:** 🟢 LOW
 **Impact:** Relies on Supabase defaults
@@ -464,7 +427,7 @@ realtime: {
 
 ## Security & Database Issues
 
-### 16. Permissive RLS Policies
+### 15. Permissive RLS Policies
 
 **Severity:** 🟠 MAJOR (Security)
 **Impact:** Potential for abuse
@@ -502,17 +465,17 @@ CREATE POLICY "Anyone can insert sessions" ON sessions
 | Category | Critical | Major | Medium | Low | Total |
 |----------|----------|-------|--------|-----|-------|
 | Data Integrity | 1 | 4 | 2 | 0 | 7 |
-| Synchronization | 0 | 3 | 3 | 2 | 8 |
+| Synchronization | 0 | 2 | 3 | 2 | 7 |
 | React Lifecycle | 0 | 1 | 5 | 0 | 6 |
 | Security | 0 | 1 | 0 | 0 | 1 |
 | Code Quality | 0 | 0 | 1 | 1 | 2 |
-| **TOTAL** | **1** | **9** | **11** | **3** | **24** |
+| **TOTAL** | **1** | **8** | **11** | **3** | **23** |
 
 ## Recommendations Priority Matrix
 
 ### High Priority (This Month)
 
-1. ⬜ Stabilize realtime effect callback dependencies
+1. ✅ Stabilize realtime effect callback dependencies
 2. ⬜ Complete realtime handlers (remove full reload calls)
 3. ⬜ Fix polling state dependencies
 4. ⬜ Refactor guest view sync pattern
