@@ -25,7 +25,7 @@ interface AppContextType extends AppState {
   loading: boolean;
   connected: boolean;
   connectionHealth?: ConnectionHealth;
-  connectionMode?: "realtime" | "polling";
+  connectionMode?: "realtime" | "polling" | "transitioning";
   lastUpdate?: Date | null;
 
   setView: (v: AppView) => void;
@@ -117,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       setState((s) => ({ ...s, view: targetView }));
     }
-  }, [state.currentGuestId, sessionHook.session?.phase, state.view]);
+  }, [state.currentGuestId, sessionHook.session?.phase]);
 
   const setView = useCallback((view: AppView) => {
     setState((s) => ({ ...s, view }));
@@ -314,9 +314,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (phase: SessionPhase) => {
       if (!state.currentSessionId) return;
 
-      await sessionService.advancePhase(state.currentSessionId, phase);
+      // Check result from database operation
+      const result = await sessionService.advancePhase(state.currentSessionId, phase);
 
-      // Update local view based on phase
+      if (!result.success) {
+        console.error("Failed to advance phase:", result.error);
+        // TODO: Show error notification to user
+        return;
+      }
+
+      // Only update local view if database update succeeded
       setState((s) => ({
         ...s,
         view:
@@ -349,11 +356,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (topicIds: string[]) => {
       if (!state.currentSessionId) return;
 
-      await questionService.confirmTopics(state.currentSessionId, topicIds);
+      // Check result from confirmTopics
+      const topicsResult = await questionService.confirmTopics(state.currentSessionId, topicIds);
 
-      // Advance to topic reveal
-      await sessionService.advancePhase(state.currentSessionId, "topicReveal");
+      if (!topicsResult.success) {
+        console.error("Failed to confirm topics:", topicsResult.error);
+        // TODO: Show error notification to user
+        return;
+      }
 
+      // Check result from advancePhase
+      const phaseResult = await sessionService.advancePhase(state.currentSessionId, "topicReveal");
+
+      if (!phaseResult.success) {
+        console.error("Failed to advance to topic reveal:", phaseResult.error);
+        // TODO: Show error notification to user
+        return;
+      }
+
+      // Only update view if both operations succeeded
       setState((s) => ({ ...s, view: "topicReveal" }));
     },
     [state.currentSessionId],
@@ -416,8 +437,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const endSession = useCallback(async () => {
     if (!state.currentSessionId) return;
 
-    await sessionService.endSession(state.currentSessionId);
+    // Check result from endSession
+    const result = await sessionService.endSession(state.currentSessionId);
 
+    if (!result.success) {
+      console.error("Failed to end session:", result.error);
+      // TODO: Show error notification to user
+      return;
+    }
+
+    // Only update view if operation succeeded
     setState((s) => ({ ...s, view: "hostEnded" }));
 
     // Reload session history

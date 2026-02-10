@@ -12,12 +12,13 @@ interface UseSupabaseSessionOptions {
   questions: Question[];
 }
 
-type ConnectionMode = "realtime" | "polling";
+type ConnectionMode = "realtime" | "polling" | "transitioning";
 
 interface ConnectionModeState {
   mode: ConnectionMode;
   realtimeHealth: "healthy" | "degraded" | "failed";
   lastModeSwitch: Date | null;
+  isTransitioning: boolean;
 }
 
 export function useSupabaseSession({ sessionId, topics, questions }: UseSupabaseSessionOptions) {
@@ -31,6 +32,7 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     mode: REALTIME_ENABLED ? "realtime" : "polling",
     realtimeHealth: "healthy",
     lastModeSwitch: null,
+    isTransitioning: false,
   });
 
   const loadSessionData = useCallback(
@@ -201,6 +203,25 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
 
     if (error) throw error;
     return data || [];
+  }, []);
+
+  const fetchPickedQuestionById = useCallback(async (sid: string, qId: string) => {
+    const { data, error } = await supabase
+      .from("picked_questions")
+      .select(
+        `
+        question_id,
+        round,
+        guests(nickname),
+        questions(text, topic_id, topics(name))
+      `,
+      )
+      .eq("session_id", sid)
+      .eq("question_id", qId)
+      .single();
+
+    if (error) throw error;
+    return data;
   }, []);
 
   const checkSessionUpdate = useCallback(async (sid: string) => {
@@ -389,15 +410,42 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
   }, []);
 
   const handleRealtimePickedQuestionInsert = useCallback(
-    (_payload: RealtimePayload) => {
-      // Need to fetch the full question details since Realtime only gives us IDs
-      // For now, we'll let polling handle this or implement a fetch here
-      console.log("[Realtime] Picked question event received, triggering refresh");
-      if (sessionId) {
-        handleFullReload();
+    async (payload: RealtimePayload) => {
+      try {
+        const questionId = payload.new.questionId;
+        console.log("[Realtime] Fetching picked question details:", questionId);
+
+        const pickedData = await fetchPickedQuestionById(sessionId!, questionId);
+
+        if (!pickedData) {
+          console.warn("[Realtime] No data returned for picked question");
+          return;
+        }
+
+        const newPick: PickedQuestion = {
+          questionId: pickedData.question_id,
+          questionText: (pickedData.questions as any)[0].text,
+          topicName: (pickedData.questions as any)[0].topics[0].name,
+          guestNickname: (pickedData.guests as any)[0].nickname,
+          round: pickedData.round,
+        };
+
+        setSession((prev) => {
+          if (!prev) return prev;
+          console.log("[Realtime] Adding picked question:", newPick.questionText);
+          return {
+            ...prev,
+            pickedQuestions: mergePickedQuestions(prev.pickedQuestions, [newPick]),
+          };
+        });
+      } catch (error) {
+        console.error("[Realtime] Failed to fetch picked question, falling back to full reload:", error);
+        if (sessionId) {
+          handleFullReload();
+        }
       }
     },
-    [sessionId, handleFullReload],
+    [sessionId, fetchPickedQuestionById, handleFullReload],
   );
 
   const handleRealtimeSessionTopicInsert = useCallback(
@@ -443,31 +491,54 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     setLastSessionUpdate(new Date());
   }, []);
 
-  const handleRealtimeQuestionPoolUpdate = useCallback(
-    (_payload: RealtimePayload) => {
-      console.log("[Realtime] Question pool updated");
-      // Pool updates are complex, let polling handle full refresh
-      if (sessionId) {
-        handleFullReload();
-      }
-    },
-    [sessionId, handleFullReload],
-  );
+  const handleRealtimeQuestionPoolUpdate = useCallback((payload: RealtimePayload) => {
+    const { questionId, picked } = payload.new;
+
+    if (picked) {
+      console.log("[Realtime] Question marked as picked, removing from pool:", questionId);
+      setSession((prev) => {
+        if (!prev) return prev;
+
+        // Remove picked question from pool
+        const updatedPool = prev.questionPool.filter((q) => q.id !== questionId);
+
+        return {
+          ...prev,
+          questionPool: updatedPool,
+        };
+      });
+    } else {
+      // Other pool updates (position changes) - uncommon in current flow
+      console.log("[Realtime] Question pool updated (non-pick):", questionId);
+    }
+  }, []);
 
   const handleConnectionStateChange = useCallback((mode: ConnectionMode) => {
     console.log("[Connection] Mode changed to:", mode);
+
+    // Set transitioning state immediately
     setConnectionMode((prev) => ({
       ...prev,
-      mode,
-      realtimeHealth: mode === "realtime" ? "healthy" : "failed",
+      mode: "transitioning",
+      isTransitioning: true,
       lastModeSwitch: new Date(),
     }));
+
+    // After a brief delay, complete the transition
+    setTimeout(() => {
+      setConnectionMode((prev) => ({
+        ...prev,
+        mode,
+        realtimeHealth: mode === "realtime" ? prev.realtimeHealth : "failed",
+        isTransitioning: false,
+      }));
+    }, 50); // 50ms ensures cleanup completes
   }, []);
 
   // Initialize Realtime hook
   const realtime = useSupabaseRealtime({
     sessionId,
-    enabled: REALTIME_ENABLED && connectionMode.mode === "realtime",
+    enabled: REALTIME_ENABLED && connectionMode.mode === "realtime" && !connectionMode.isTransitioning,
     onGuestInsert: handleRealtimeGuestInsert,
     onGuestUpdate: handleRealtimeGuestUpdate,
     onVoteInsert: handleRealtimeVoteInsert,
@@ -480,7 +551,7 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
 
   // Set up polling (only enabled when in polling mode)
   const polling = usePolling({
-    enabled: connectionMode.mode === "polling" && !!sessionId,
+    enabled: connectionMode.mode === "polling" && !!sessionId && !connectionMode.isTransitioning,
     sessionId,
     phase: session?.phase || "lobby",
     onIncrementalPoll: handleIncrementalPoll,
@@ -498,6 +569,14 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
     loadSessionData(sessionId);
   }, [sessionId, loadSessionData]);
 
+  // Post-transition reconciliation: full reload after mode switch
+  useEffect(() => {
+    if (connectionMode.lastModeSwitch && !connectionMode.isTransitioning && sessionId) {
+      console.log("[Connection] Transition complete, performing reconciliation");
+      handleFullReload();
+    }
+  }, [connectionMode.isTransitioning, connectionMode.lastModeSwitch, sessionId, handleFullReload]);
+
   // Auto-recovery: attempt to switch back to Realtime after 30 seconds
   useEffect(() => {
     if (REALTIME_ENABLED && connectionMode.mode === "polling" && connectionMode.lastModeSwitch) {
@@ -507,7 +586,7 @@ export function useSupabaseSession({ sessionId, topics, questions }: UseSupabase
         setConnectionMode((prev) => ({
           ...prev,
           mode: "realtime",
-          realtimeHealth: "healthy",
+          realtimeHealth: "degraded", // Don't assume healthy until verified
         }));
       }, 30000);
 

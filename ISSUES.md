@@ -11,167 +11,7 @@ This application implements a **real-time collaborative session system** using a
 - **Fallback Mode:** HTTP polling with 1-second intervals
 - **Auto-Recovery:** Attempts to reconnect to realtime every 30 seconds
 
-The audit identified **15 critical and major issues** affecting data integrity, synchronization reliability, and application stability.
-
-## Major Issues (High Priority)
-
-### 1. Incomplete Realtime Handlers Trigger Full Reloads
-
-**Severity:** 🟠 MAJOR
-**Impact:** Defeats purpose of realtime updates
-
-**Problem:** Some realtime events trigger full database reloads instead of incremental updates.
-
-**Location:** `useSupabaseSession.ts:357-367`
-
-```typescript
-const handleRealtimePickedQuestionInsert = useCallback(
-  (_payload: RealtimePayload) => {
-    console.log("[Realtime] Picked question event received, triggering refresh");
-    if (sessionId) {
-      handleFullReload();  // ❌ Defeats purpose of realtime
-    }
-  },
-  [sessionId, handleFullReload],
-);
-```
-
-**Affected Events:**
-
-- Picked question inserts
-- Question pool updates
-
-**Impact:**
-
-- Realtime events that should be instant instead trigger full data reloads
-- Negates the benefit of WebSocket subscriptions
-- Increases database load
-
-**Recommendation:**
-
-- Fetch only the specific question details needed
-- Merge incrementally instead of full reload
-- Cache question data to avoid repeated fetches
-
-### 2. Polling State Dependencies Cause Restart Loops
-
-**Severity:** 🟠 MAJOR
-**Impact:** Unstable polling during error conditions
-
-**Problem:** Including state values in effect dependencies causes effect to re-run on every state change.
-
-**Location:** `usePolling.ts:256`
-
-```typescript
-}, [
-  enabled,
-  sessionId,
-  phase,
-  state.consecutiveErrors,    // ⚠️ Changes on every error
-  state.lastFullFetch,         // ⚠️ Changes every 30 seconds
-  onIncrementalPoll,
-  onFullReload
-]);
-```
-
-**Impact:**
-
-- When errors occur, `consecutiveErrors` increments
-- Effect cleanup runs, destroying current `setTimeout`
-- Effect re-runs, potentially missing scheduled polls
-- Backoff calculation happens outside effect but depends on state from inside
-
-**Recommendation:**
-
-- Use refs for error count instead of state dependencies
-- Remove `state.consecutiveErrors` and `state.lastFullFetch` from dependencies
-- Use functional state updates to access current state
-
-### 3. Guest View Sync Updates Own Dependency
-
-**Severity:** 🟠 MAJOR
-**Impact:** Potential infinite loop, fragile pattern
-
-**Problem:** Effect updates `state.view`, which is in the dependency array.
-
-**Location:** `AppContext.tsx:93-120`
-
-```typescript
-useEffect(() => {
-  // ...
-  if (state.view !== targetView) {
-    setState((s) => ({ ...s, view: targetView }));
-  }
-}, [state.currentGuestId, sessionHook.session?.phase, state.view]);
-```
-
-**Why It Works:** Guard clause `if (state.view !== targetView)` prevents actual infinite loop.
-
-**Risk:** If `phaseToViewMap` logic has bugs, could cause unexpected view changes.
-
-**Code Smell:** Effect that updates its own dependency is fragile.
-
-**Recommendation:**
-
-- Use a reducer for view state instead
-- Or remove `state.view` from dependencies and rely only on phase changes
-
-### 4. Mode Transition Data Duplication
-
-**Severity:** 🟠 MAJOR
-**Impact:** Duplicate events during realtime ↔ polling switches
-
-**Problem:** During transition between realtime and polling modes, both systems may be active simultaneously.
-
-**Location:** `useSupabaseSession.ts` connection mode switching
-
-**Impact:**
-
-- Duplicate events could be processed before deduplication occurs
-- Brief gaps in synchronization during mode switches
-- Possible out-of-order updates
-
-**Current Mitigation:** Database constraints and client-side deduplication provide partial protection.
-
-**Recommendation:**
-
-- Add mode transition guards to ensure only one sync mode is active
-- Verify state consistency after mode switches
-- Implement reconciliation logic
-
-### 5. Phase Advancement Without Rollback
-
-**Severity:** 🟠 MAJOR
-**Impact:** Host and guests could end up in different phases
-
-**Problem:** Phase advancement updates local view immediately without waiting for database confirmation.
-
-**Location:** `AppContext.tsx:313-335`
-
-```typescript
-const advancePhase = useCallback(
-  async (phase: SessionPhase) => {
-    await sessionService.advancePhase(state.currentSessionId, phase);
-
-    // Update local view based on phase - NO ERROR CHECKING
-    setState((s) => ({ ...s, view: /* ... */ }));
-  },
-  [state.currentSessionId],
-);
-```
-
-**Impact:**
-
-- If database update fails, local view is still updated
-- No rollback mechanism
-- Host could be on different phase than database
-- Guests syncing from database would show different phase
-
-**Recommendation:**
-
-- Check result from `advancePhase` before updating local state
-- Implement rollback on failure
-- Show error message if phase advance fails
+The audit identified several issues affecting data integrity, synchronization reliability, and application stability.
 
 ## Medium Priority Issues
 
@@ -464,22 +304,14 @@ CREATE POLICY "Anyone can insert sessions" ON sessions
 
 | Category | Critical | Major | Medium | Low | Total |
 |----------|----------|-------|--------|-----|-------|
-| Data Integrity | 1 | 4 | 2 | 0 | 7 |
-| Synchronization | 0 | 2 | 3 | 2 | 7 |
-| React Lifecycle | 0 | 1 | 5 | 0 | 6 |
+| Data Integrity | 0 | 0 | 2 | 0 | 2 |
+| Synchronization | 0 | 0 | 3 | 2 | 5 |
+| React Lifecycle | 0 | 0 | 5 | 0 | 5 |
 | Security | 0 | 1 | 0 | 0 | 1 |
 | Code Quality | 0 | 0 | 1 | 1 | 2 |
-| **TOTAL** | **1** | **8** | **11** | **3** | **23** |
+| **TOTAL** | **0** | **1** | **11** | **3** | **15** |
 
 ## Recommendations Priority Matrix
-
-### High Priority (This Month)
-
-1. ✅ Stabilize realtime effect callback dependencies
-2. ⬜ Complete realtime handlers (remove full reload calls)
-3. ⬜ Fix polling state dependencies
-4. ⬜ Refactor guest view sync pattern
-5. ⬜ Add mode transition guards
 
 ### Medium Priority (Next Quarter)
 

@@ -40,14 +40,6 @@ export interface UsePollingReturn {
   manualRefresh: () => void;
 }
 
-interface PollingState {
-  isPolling: boolean;
-  lastFullFetch: Date | null;
-  lastIncrementalFetch: Date | null;
-  consecutiveErrors: number;
-  connectionHealth: ConnectionHealth;
-}
-
 /**
  * Custom hook for managing polling-based data synchronization
  */
@@ -58,11 +50,12 @@ export function usePolling({
   onIncrementalPoll,
   onFullReload,
 }: UsePollingOptions): UsePollingReturn {
-  const [state, setState] = useState<PollingState>({
+  // State reduced to UI-only fields
+  const [state, setState] = useState<{
+    isPolling: boolean;
+    connectionHealth: ConnectionHealth;
+  }>({
     isPolling: false,
-    lastFullFetch: null,
-    lastIncrementalFetch: null,
-    consecutiveErrors: 0,
     connectionHealth: "healthy",
   });
 
@@ -70,6 +63,33 @@ export function usePolling({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isPollingRef = useRef<boolean>(false);
   const isMountedRef = useRef<boolean>(true);
+
+  // Refs for logic values (prevent effect restarts on changes)
+  const consecutiveErrorsRef = useRef<number>(0);
+  const lastFullFetchRef = useRef<Date | null>(null);
+  const lastIncrementalFetchRef = useRef<Date | null>(null);
+
+  // Callback refs for stable wrappers
+  const onIncrementalPollRef = useRef(onIncrementalPoll);
+  const onFullReloadRef = useRef(onFullReload);
+
+  // Sync callback refs on every render
+  useEffect(() => {
+    onIncrementalPollRef.current = onIncrementalPoll;
+  }, [onIncrementalPoll]);
+
+  useEffect(() => {
+    onFullReloadRef.current = onFullReload;
+  }, [onFullReload]);
+
+  // Create stable callback wrappers with empty dependency arrays
+  const stableOnIncrementalPoll = useCallback(async () => {
+    await onIncrementalPollRef.current();
+  }, []);
+
+  const stableOnFullReload = useCallback(async () => {
+    await onFullReloadRef.current();
+  }, []);
 
   /**
    * Manual refresh function exposed to UI
@@ -80,27 +100,36 @@ export function usePolling({
 
     const doRefresh = async () => {
       try {
-        await onFullReload();
+        await stableOnFullReload();
         const now = new Date();
+
+        // Update refs (source of truth)
+        lastFullFetchRef.current = now;
+        lastIncrementalFetchRef.current = now;
+        consecutiveErrorsRef.current = 0;
+
+        // Update state (UI only)
         setState((s) => ({
           ...s,
-          lastFullFetch: now,
-          lastIncrementalFetch: now,
-          consecutiveErrors: 0,
           connectionHealth: "healthy",
         }));
       } catch (error) {
         console.error("[Polling] Manual refresh failed:", error);
+
+        // Update ref first
+        consecutiveErrorsRef.current += 1;
+        const newErrors = consecutiveErrorsRef.current;
+
+        // Update state for UI
         setState((s) => ({
           ...s,
-          consecutiveErrors: s.consecutiveErrors + 1,
-          connectionHealth: s.consecutiveErrors >= 4 ? "disconnected" : "degraded",
+          connectionHealth: newErrors >= 4 ? "disconnected" : "degraded",
         }));
       }
     };
 
     doRefresh();
-  }, [sessionId, enabled, onFullReload]);
+  }, [sessionId, enabled, stableOnFullReload]);
 
   /**
    * Main polling loop
@@ -154,60 +183,57 @@ export function usePolling({
       try {
         const now = new Date();
 
-        // Determine if we should do a full reload
+        // Read from ref for decision logic
         // Full reload every 30 seconds as safety net to prevent state drift
-        const shouldFullReload = !state.lastFullFetch || now.getTime() - state.lastFullFetch.getTime() > 30000; // 30 seconds
+        const shouldFullReload =
+          !lastFullFetchRef.current || now.getTime() - lastFullFetchRef.current.getTime() > 30000;
 
         if (shouldFullReload) {
           console.log("[Polling] Executing full reload");
-          await onFullReload();
+          await stableOnFullReload();
 
           if (!isMountedRef.current) return;
 
-          setState((s) => ({
-            ...s,
-            lastFullFetch: now,
-            lastIncrementalFetch: now,
-            consecutiveErrors: 0,
-            connectionHealth: "healthy",
-          }));
+          // Update refs
+          lastFullFetchRef.current = now;
+          lastIncrementalFetchRef.current = now;
+          consecutiveErrorsRef.current = 0;
+
+          // Update state (UI only)
+          setState((s) => ({ ...s, connectionHealth: "healthy" }));
         } else {
           console.log("[Polling] Executing incremental poll");
-          await onIncrementalPoll();
+          await stableOnIncrementalPoll();
 
           if (!isMountedRef.current) return;
 
-          setState((s) => ({
-            ...s,
-            lastIncrementalFetch: now,
-            consecutiveErrors: 0,
-            connectionHealth: "healthy",
-          }));
+          // Update refs
+          lastIncrementalFetchRef.current = now;
+          consecutiveErrorsRef.current = 0;
+
+          // Update state (UI only)
+          setState((s) => ({ ...s, connectionHealth: "healthy" }));
         }
       } catch (error) {
         console.error("[Polling] Poll failed:", error);
-
         if (!isMountedRef.current) return;
 
-        // Update error count and connection health
-        setState((s) => {
-          const newErrors = s.consecutiveErrors + 1;
-          let newHealth: ConnectionHealth = "healthy";
+        // Update ref
+        consecutiveErrorsRef.current += 1;
+        const newErrors = consecutiveErrorsRef.current;
 
-          if (newErrors >= 5) {
-            newHealth = "disconnected";
-          } else if (newErrors >= 2) {
-            newHealth = "degraded";
-          }
+        // Calculate health
+        let newHealth: ConnectionHealth = "healthy";
+        if (newErrors >= 5) {
+          newHealth = "disconnected";
+        } else if (newErrors >= 2) {
+          newHealth = "degraded";
+        }
 
-          console.warn(`[Polling] ${newErrors} consecutive errors, health: ${newHealth}`);
+        console.warn(`[Polling] ${newErrors} consecutive errors, health: ${newHealth}`);
 
-          return {
-            ...s,
-            consecutiveErrors: newErrors,
-            connectionHealth: newHealth,
-          };
-        });
+        // Update state (UI only)
+        setState((s) => ({ ...s, connectionHealth: newHealth }));
       } finally {
         isPollingRef.current = false;
       }
@@ -225,10 +251,10 @@ export function usePolling({
         clearTimeout(timeoutRef.current);
       }
 
-      // Calculate delay (use backoff if errors, otherwise use phase interval)
-      const delay = state.consecutiveErrors > 0 ? getBackoffDelay(state.consecutiveErrors) : interval;
+      // Read from ref for backoff calculation
+      const delay = consecutiveErrorsRef.current > 0 ? getBackoffDelay(consecutiveErrorsRef.current) : interval;
 
-      console.log(`[Polling] Next poll in ${delay}ms`);
+      console.log(`[Polling] Next poll in ${delay}ms (errors: ${consecutiveErrorsRef.current})`);
 
       timeoutRef.current = setTimeout(() => {
         executePoll().then(scheduleNextPoll);
@@ -253,12 +279,12 @@ export function usePolling({
 
       isPollingRef.current = false;
     };
-  }, [enabled, sessionId, phase, state.consecutiveErrors, state.lastFullFetch, onIncrementalPoll, onFullReload]);
+  }, [enabled, sessionId, phase, stableOnIncrementalPoll, stableOnFullReload]);
 
   return {
     isPolling: state.isPolling,
     connectionHealth: state.connectionHealth,
-    lastUpdate: state.lastIncrementalFetch || state.lastFullFetch,
+    lastUpdate: lastIncrementalFetchRef.current || lastFullFetchRef.current,
     manualRefresh,
   };
 }
